@@ -2,23 +2,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../data/models/filament.dart';
 import '../../data/models/order.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/filament_repository.dart';
 import '../../data/repositories/production_repository.dart';
 import '../../features/production/print_item_sheet.dart';
 import '../../features/scanner/scanner_screen.dart';
-import '../../features/spools/weigh_sheet.dart';
 import '../routes.dart';
 import 'code_normalizer.dart';
 import 'scan_mode.dart';
 
 /// Bộ chuẩn hóa mã dựng từ dữ liệu đang có trong app.
+///
+/// Mỗi nguồn dữ liệu ở đây tương ứng một loại tem đang dán trong xưởng — thiếu
+/// nguồn nào thì loại tem đó quét sẽ báo "không nhận ra mã".
 final codeNormalizerProvider = Provider<CodeNormalizer>((ref) {
   final locations = ref.watch(locationsProvider).valueOrNull ?? const [];
   final printers = ref.watch(printersProvider).valueOrNull ?? const [];
-  final spools = ref.watch(spoolsProvider).valueOrNull ?? const [];
+  final spools = ref.watch(spoolsProvider).valueOrNull ?? const <Spool>[];
   final store = ref.watch(storeProvider).valueOrNull;
+  final sheets = ref.watch(peiSheetsProvider).valueOrNull ?? const <PeiSheet>[];
+  final orders = ref.watch(ordersProvider).valueOrNull ?? const <Order>[];
 
   return CodeNormalizer(
     locationIds: locations.map((e) => e.id).toSet(),
@@ -27,6 +32,14 @@ final codeNormalizerProvider = Provider<CodeNormalizer>((ref) {
     storeCodes: {
       for (final product in store?.sanPham ?? const []) ...[product.maQR, product.id],
     },
+    peiSheetIds: sheets.map((e) => e.id).toSet(),
+    orderCodes: {
+      for (final order in orders) ...[
+        if (order.orderCode != null) order.orderCode!,
+        order.id,
+      ],
+    },
+    colorNames: spools.map((e) => e.filamentColorName).where((e) => e.isNotEmpty).toSet(),
   );
 });
 
@@ -39,10 +52,22 @@ class ScanFailure implements Exception {
   String toString() => message;
 }
 
-/// Điều phối mã vừa quét — port của luồng trong `src/app/page.tsx`.
+/// Điều phối mã vừa quét — mỗi loại tem mở đúng màn thông tin của nó.
 ///
-/// Thứ tự ưu tiên bám đúng bản web: đang bật chế độ gán/tháo (scanMode) thì mã
-/// cuộn nhựa được xử lý trước; sau đó mới tới kho → máy in → cuộn → tem → hàng hóa.
+/// | Tem quét | Mở ra |
+/// |---|---|
+/// | Cuộn nhựa | Chi tiết cuộn (có nút cân ngay đầu màn) |
+/// | Tem màu `CLR-` | Danh sách mọi cuộn cùng màu + tổng tồn |
+/// | Kho `LOC-` | Chi tiết kho + cuộn đang chứa |
+/// | Máy in `PRT-` | Chi tiết máy in + trạng thái realtime |
+/// | Slot AMS `PRT-xx-L1..4` | Bật chế độ gán cuộn vào line đó |
+/// | Mâm `PEI-<id>` | Chi tiết mâm + miếng in trên mâm |
+/// | Mã đơn hàng | Chi tiết đơn + tiến độ tem |
+/// | Barcode 8 số | Bảng đổi trạng thái miếng in |
+/// | Mã hàng hóa `SP-` | Chi tiết hàng hóa + nhập/xuất kho |
+///
+/// Ngoại lệ duy nhất phá thứ tự này là **chế độ gán hàng loạt** (scanMode): khi
+/// đang bật, mã cuộn nhựa được xử lý ngay thành thao tác gán/tháo.
 class ScanRouter {
   const ScanRouter(this._ref);
 
@@ -74,12 +99,29 @@ class ScanRouter {
             );
         return 'Đã bật chế độ gán cuộn vào Line ${scanned.slot}. Quét tiếp mã cuộn nhựa.';
 
+      case ScanKind.colorTag:
+        if (scanned.id == null) {
+          throw ScanFailure(
+            'Không có cuộn nhựa nào màu "${scanned.label ?? scanned.raw}".',
+          );
+        }
+        if (context.mounted) context.push(Routes.colorDetail(scanned.id!));
+        return null;
+
       case ScanKind.location:
         if (context.mounted) context.push(Routes.locationDetail(scanned.id!));
         return null;
 
       case ScanKind.printer:
         if (context.mounted) context.push(Routes.printerDetail(scanned.id!));
+        return null;
+
+      case ScanKind.peiSheet:
+        if (context.mounted) context.push(Routes.peiSheetDetail(scanned.id!));
+        return null;
+
+      case ScanKind.order:
+        if (context.mounted) context.push(Routes.orderDetail(scanned.id!));
         return null;
 
       case ScanKind.storeProduct:
@@ -96,16 +138,11 @@ class ScanRouter {
       case ScanKind.printItem:
         return _handlePrintItem(context, scanned.id!);
 
-      case ScanKind.colorTag:
-        // Tem mã màu chỉ để in/dán, không có màn riêng — đưa về danh sách cuộn nhựa
-        // đã lọc sẵn theo tên màu.
-        final color = scanned.id!.replaceFirst('CLR-', '').replaceAll('-', ' ');
-        // `go` chứ không `push`: đây là tab Cuộn nhựa, chuyển hẳn sang tab đó.
-        if (context.mounted) context.go(Routes.spoolsWithQuery(color));
-        return null;
-
       case ScanKind.unknown:
-        throw ScanFailure('Không nhận ra mã "${scanned.raw}" trong hệ thống.');
+        throw ScanFailure(
+          'Không nhận ra mã "${scanned.raw}".\n'
+          'Kiểm tra xem dữ liệu đã tải xong chưa, hoặc tem này thuộc hệ thống khác.',
+        );
     }
   }
 
@@ -124,7 +161,7 @@ class ScanRouter {
     }
   }
 
-  /// Cuộn nhựa: đang bật scanMode thì gán/tháo, ngược lại mở màn cân.
+  /// Cuộn nhựa: đang bật scanMode thì gán/tháo, ngược lại mở màn thông tin cuộn.
   Future<String?> _handleSpool(BuildContext context, String spoolId) async {
     final mode = _ref.read(scanModeProvider);
 
@@ -155,12 +192,7 @@ class ScanRouter {
       return '$verb cuộn $spoolId $preposition ${mode.targetName}.';
     }
 
-    final spool = _ref.read(spoolByIdProvider(spoolId));
-    if (spool == null) {
-      throw ScanFailure('Không tìm thấy cuộn nhựa $spoolId.');
-    }
-    if (!context.mounted) return null;
-    await showWeighSheet(context, spool);
+    if (context.mounted) context.push(Routes.spoolDetail(spoolId));
     return null;
   }
 
@@ -188,7 +220,7 @@ Future<void> openGlobalScanner(BuildContext context, WidgetRef ref) async {
       builder: (_) => Consumer(
         builder: (context, ref, _) => ScannerScreen(
           title: 'Quét mã',
-          hint: 'Cuộn nhựa · Kho · Máy in · Tem đơn hàng · Hàng hóa',
+          hint: 'Cuộn nhựa · Tem màu · Kho · Máy in · Mâm PEI · Đơn hàng · Hàng hóa',
           continuous: continuous,
           onCode: (code) => ScanRouter(ref).handle(context, code),
         ),

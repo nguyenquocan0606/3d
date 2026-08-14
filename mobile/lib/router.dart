@@ -14,12 +14,14 @@ import 'features/printers/printers_screen.dart';
 import 'features/production/order_check_screen.dart';
 import 'features/production/order_detail_screen.dart';
 import 'features/production/pei_screen.dart';
+import 'features/production/pei_sheet_detail_screen.dart';
 import 'features/production/production_screen.dart';
 import 'features/scale/scale_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/shell/app_shell.dart';
 import 'features/shell/quick_menu.dart';
 import 'features/spools/add_spool_screen.dart';
+import 'features/spools/color_detail_screen.dart';
 import 'features/spools/spool_detail_screen.dart';
 import 'features/spools/spools_screen.dart';
 import 'features/store/store_detail_screen.dart';
@@ -153,6 +155,14 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/product/:id',
       builder: (context, state) => StoreDetailScreen(productId: _param(state)),
+    ),
+    GoRoute(
+      path: '/color/:id',
+      builder: (context, state) => ColorDetailScreen(colorName: _param(state)),
+    ),
+    GoRoute(
+      path: '/pei-sheet/:id',
+      builder: (context, state) => PeiSheetDetailScreen(sheetId: _param(state)),
     ),
   ],
 );

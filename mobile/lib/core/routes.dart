@@ -34,8 +34,6 @@ class Routes {
   static String locationDetail(String id) => '/location/${Uri.encodeComponent(id)}';
   static String orderDetail(String id) => '/order/${Uri.encodeComponent(id)}';
   static String storeDetail(String id) => '/product/${Uri.encodeComponent(id)}';
-
-  /// Danh sách cuộn nhựa kèm từ khóa lọc sẵn (dùng khi quét tem mã màu `CLR-`).
-  static String spoolsWithQuery(String query) =>
-      '$spools?q=${Uri.encodeQueryComponent(query)}';
+  static String colorDetail(String name) => '/color/${Uri.encodeComponent(name)}';
+  static String peiSheetDetail(String id) => '/pei-sheet/${Uri.encodeComponent(id)}';
 }

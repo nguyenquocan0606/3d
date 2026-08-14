@@ -1,0 +1,210 @@
+name: Mobile CI
+
+# Build app Flutter trong thư mục mobile/.
+#
+# Nếu bạn tách mobile/ thành repo riêng (thư mục này là gốc repo), chỉ cần sửa
+# APP_DIR thành "." — mọi job đều dùng chung biến này.
+#
+# Ba job:
+#   analyze  — phân tích tĩnh + test (Ubuntu, nhanh, luôn chạy)
+#   android  — đóng gói APK (Ubuntu)
+#   ios      — đóng gói IPA trên macOS. Không có secret ký thì ra bản CHƯA KÝ,
+#              vẫn cài được bằng Sideloadly/AltStore.
+
+on:
+  push:
+    branches: [main, master]
+    paths: ['mobile/**', '.github/workflows/mobile.yml']
+  pull_request:
+    paths: ['mobile/**', '.github/workflows/mobile.yml']
+  workflow_dispatch:
+
+env:
+  APP_DIR: mobile
+  FLUTTER_CHANNEL: stable
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  analyze:
+    name: Phân tích tĩnh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+
+      - name: Tải dependencies
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter pub get
+
+      - name: flutter analyze
+        working-directory: ${{ env.APP_DIR }}
+        # --no-fatal-infos: chỉ chặn khi có lỗi/cảnh báo thật, gợi ý style không
+        # làm đỏ CI.
+        run: flutter analyze --no-fatal-infos
+
+      - name: flutter test
+        working-directory: ${{ env.APP_DIR }}
+        # Bắt buộc phải có ít nhất 1 test: `flutter test` thoát khác 0 khi
+        # không tìm thấy file test nào.
+        run: flutter test --no-pub
+
+  # ────────────────────────────────────────────────────────────────────────────
+  android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    needs: analyze
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+
+      - name: Sinh thư mục android/ nếu chưa có
+        working-directory: ${{ env.APP_DIR }}
+        # android/ không commit vào repo (do flutter create sinh ra được).
+        # Dạng lệnh này CHỈ thêm platform, không đụng tới lib/.
+        run: |
+          if [ ! -d android ]; then
+            flutter create --platforms=android \
+              --project-name manage3d --org click.quocan .
+          fi
+          python3 tool/patch_platforms.py
+
+      - name: Build APK
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter build apk --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: ${{ env.APP_DIR }}/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
+
+  # ────────────────────────────────────────────────────────────────────────────
+  ios:
+    name: Build iOS IPA
+    # iOS bắt buộc chạy trên macOS — Apple không cho biên dịch trên Linux/Windows.
+    runs-on: macos-latest
+    needs: analyze
+    # Khai ở cấp job: biểu thức `if:` của step đọc được `env`, nhưng KHÔNG đọc
+    # được `secrets` trực tiếp — nên phải bắc cầu qua đây.
+    env:
+      IOS_CERT_P12: ${{ secrets.IOS_CERT_P12 }}
+      IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+      IOS_PROVISION_PROFILE: ${{ secrets.IOS_PROVISION_PROFILE }}
+      IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+
+      - name: Sinh thư mục ios/ nếu chưa có
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          if [ ! -d ios ]; then
+            flutter create --platforms=ios \
+              --project-name manage3d --org click.quocan .
+          fi
+          # Vá Info.plist (quyền camera, mạng LAN, ATS) + Podfile (target iOS 13).
+          python3 tool/patch_platforms.py
+
+      - name: Tải dependencies
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter pub get
+
+      - name: CocoaPods
+        working-directory: ${{ env.APP_DIR }}/ios
+        run: pod install --repo-update
+
+      # ── Ký số (chỉ chạy khi đã nạp đủ secret) ──
+      - name: Nạp chứng chỉ ký
+        id: signing
+        if: ${{ env.IOS_CERT_P12 != '' }}
+        run: |
+          # Dùng lệnh security trực tiếp thay vì action bên thứ ba: chứng chỉ ký
+          # là thứ nhạy cảm nhất trong pipeline, không nên đưa qua code lạ.
+          KEYCHAIN=$RUNNER_TEMP/build.keychain
+          KEYCHAIN_PASSWORD=$(uuidgen)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 900 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          echo "$IOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$IOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain
+
+          PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
+          mkdir -p "$PROFILES"
+          echo "$IOS_PROVISION_PROFILE" | base64 --decode \
+            > "$PROFILES/build.mobileprovision"
+
+          rm -f "$RUNNER_TEMP/cert.p12"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build IPA đã ký
+        if: ${{ steps.signing.outputs.signed == 'true' }}
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          cat > ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>ad-hoc</string>
+            <key>teamID</key><string>${IOS_TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>compileBitcode</key><false/>
+          </dict>
+          </plist>
+          PLIST
+          flutter build ipa --release --export-options-plist=ExportOptions.plist
+
+      # ── Không có secret: build không ký ──
+      - name: Build không ký
+        if: ${{ steps.signing.outputs.signed != 'true' }}
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter build ios --release --no-codesign
+
+      - name: Đóng gói IPA không ký
+        if: ${{ steps.signing.outputs.signed != 'true' }}
+        working-directory: ${{ env.APP_DIR }}
+        # IPA thực chất là file zip chứa thư mục Payload/. Bản chưa ký này cài
+        # được bằng Sideloadly/AltStore — công cụ đó sẽ tự ký bằng Apple ID.
+        run: |
+          mkdir -p build/ipa/Payload
+          cp -R build/ios/iphoneos/Runner.app build/ipa/Payload/
+          cd build/ipa
+          zip -qry manage3d-unsigned.ipa Payload
+          rm -rf Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: |
+            ${{ env.APP_DIR }}/build/ios/ipa/*.ipa
+            ${{ env.APP_DIR }}/build/ipa/*.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Dọn keychain
+        if: ${{ always() && steps.signing.outputs.signed == 'true' }}
+        run: security delete-keychain "$RUNNER_TEMP/build.keychain" || true

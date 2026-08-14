@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
@@ -7,6 +8,7 @@ import '../../data/models/order.dart';
 import '../../data/models/printer.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/production_repository.dart';
+import '../../core/routes.dart';
 import '../scanner/scanner_screen.dart';
 import 'print_item_sheet.dart';
 
@@ -267,6 +269,7 @@ class _SheetCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return SectionCard(
+      onTap: () => context.push(Routes.peiSheetDetail(sheet.id)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

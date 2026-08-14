@@ -14,7 +14,9 @@
 build/
 .flutter-plugins
 .flutter-plugins-dependencies
-pubspec.lock
+
+# pubspec.lock KHÔNG bỏ qua: đây là app (không phải package), cần khóa phiên bản
+# gói để máy dev và CI dựng ra cùng một kết quả.
 
 # IDE
 .idea/

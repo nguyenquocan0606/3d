@@ -91,21 +91,31 @@ Tab **Tất cả** là menu đầy đủ mọi tính năng, gom theo 5 nhóm (Qu
 Máy in & lệnh in / Sản xuất / Cửa hàng & hệ thống). Cùng menu đó mở nhanh được từ bất kỳ
 màn hình chính nào qua nút **☰** trên thanh tiêu đề, khỏi phải quay về tab.
 
-**Nút QUÉT là trung tâm của app.** Quét xong, mã được phân loại rồi điều hướng đúng chỗ
+**Nút QUÉT là trung tâm của app.** Mỗi loại tem mở đúng màn thông tin của nó
 (port `handleScannedCode` của `src/app/page.tsx`):
 
-| Mã quét | Hành vi |
+| Tem quét | Mở ra |
 |---|---|
-| `LOC-xx` | Mở chi tiết kho |
-| `PRT-xx` | Mở chi tiết máy in |
-| `PRT-xx-L1..4` | Bật chế độ gán cuộn vào slot AMS |
-| Mã cuộn nhựa | Mở màn **Cân** (hoặc gán/tháo nếu đang bật chế độ hàng loạt) |
-| 8 chữ số | Mở bảng đổi trạng thái tem miếng in |
-| `CLR-xx` | Lọc danh sách cuộn theo màu |
-| `SP-...` | Mở chi tiết hàng hóa cửa hàng |
-| `CMD-*` | QR lệnh (reset kiểm kho...) |
+| Mã cuộn nhựa | Chi tiết cuộn — tồn, vị trí, nút cân ngay đầu màn |
+| `CLR-…` tem màu | Mọi cuộn cùng màu + tổng nhựa còn |
+| `LOC-…` kho | Chi tiết kho + cuộn đang chứa |
+| `PRT-…` máy in | Trạng thái realtime + điều khiển |
+| `PRT-…-L1..4` slot AMS | Bật chế độ gán cuộn vào line đó |
+| `PEI-<id>` mâm in | Miếng in trên mâm + máy đang gắn |
+| Mã đơn hàng | Chi tiết đơn + tiến độ tem |
+| Barcode 8 số | Bảng đổi trạng thái miếng in |
+| `SP-…` hàng hóa | Chi tiết + nhập/xuất kho |
+| `CMD-…` | QR lệnh (reset kiểm kho…) |
 
 Mã được chuẩn hóa bằng cách bỏ `-` và viết hoa, nên `PLAWHT01` = `PLA-WHT-01`.
+
+Riêng tem màu cần xử lý thêm: máy in nhiệt không in được Unicode nên QR in ra đã
+**bị bỏ dấu** (`CLR-Đỏ` → `CLR-DO`), trong khi DB vẫn lưu "Đỏ". App port lại hàm
+`removeDiacritics` của backend để khớp ngược (`stripDiacritics` trong
+`core/scan/code_normalizer.dart`).
+
+Mâm PEI không có tiền tố nào ở backend (id là uuid) nên app tự quy ước tem là
+`PEI-<id>`; in tem này từ màn chi tiết mâm.
 
 ---
 
@@ -189,3 +199,52 @@ Chi tiết ở §10 và §11.6 của `TAI-LIEU-HE-THONG.md`. Tóm tắt mức ư
 2. **Phân trang** cho `GET /api/spools` (chưa có endpoint riêng — app đang phải tải `/api/filaments` rồi làm phẳng) và `GET /api/print-items`.
 3. **CRUD từng bản ghi cho hàng hóa** thay `PUT` full-replace — mỗi lần nhập/xuất kho hiện đang đẩy lại toàn bộ danh sách.
 4. `PATCH /api/tasks3d/[id]` để kết thúc lệnh in, `GET /api/health` cho màn Cài đặt.
+
+
+---
+
+## 8. CI/CD (GitHub Actions)
+
+Workflow ở [`.github/workflows/mobile.yml`](../.github/workflows/mobile.yml) — đặt ở
+**gốc repo**, không phải trong `mobile/`. Nếu bạn tách `mobile/` thành repo riêng thì
+chỉ cần sửa `APP_DIR: mobile` thành `APP_DIR: .`.
+
+| Job | Máy | Kết quả |
+|---|---|---|
+| `analyze` | Ubuntu | `flutter analyze` + `flutter test` |
+| `android` | Ubuntu | `app-release.apk` |
+| `ios` | **macOS** | `.ipa` |
+
+`android/` và `ios/` không commit vào repo nên workflow tự sinh bằng
+`flutter create --platforms=…` (dạng lệnh này chỉ thêm platform, không đụng `lib/`),
+rồi chạy `tool/patch_platforms.py` để vá quyền và cấu hình.
+
+### iOS không cần tài khoản Apple trả phí
+
+Không nạp secret nào thì job iOS build **bản chưa ký** và đóng gói `.ipa` thủ công
+(IPA thực chất là zip chứa `Payload/`). Tải artifact `ios-ipa` về rồi cài bằng
+**Sideloadly** hoặc **AltStore** — công cụ đó tự ký bằng Apple ID miễn phí, app dùng
+được 7 ngày rồi phải ký lại.
+
+### iOS có ký sẵn
+
+Nạp 4 secret vào repo (*Settings → Secrets and variables → Actions*):
+
+| Secret | Nội dung |
+|---|---|
+| `IOS_CERT_P12` | Chứng chỉ Apple Distribution (`.p12`) đã `base64` |
+| `IOS_CERT_PASSWORD` | Mật khẩu file `.p12` |
+| `IOS_PROVISION_PROFILE` | Provisioning profile (`.mobileprovision`) đã `base64` |
+| `IOS_TEAM_ID` | Team ID 10 ký tự trong Apple Developer |
+
+Có đủ secret thì job tự chuyển sang nhánh ký và xuất IPA ad-hoc cài thẳng được.
+
+Bước nạp chứng chỉ dùng lệnh `security` của macOS chứ không dùng action bên thứ ba —
+chứng chỉ ký là thứ nhạy cảm nhất trong pipeline, không nên đưa qua code lạ. Keychain
+tạm cũng được xóa ở bước cuối kể cả khi build lỗi.
+
+Tạo base64 để dán vào secret:
+
+```bash
+base64 -i Certificates.p12 | pbcopy
+```
