@@ -10,7 +10,9 @@ Những thứ script này bảo đảm:
     - NSCameraUsageDescription (bắt buộc, thiếu là App Store từ chối)
     - NSAppTransportSecurity cho phép gọi http:// tới máy chủ LAN
     - NSLocalNetworkUsageDescription (iOS 14+ hỏi quyền khi truy cập LAN)
-    - Deployment target iOS 13 (mobile_scanner yêu cầu >= 12)
+    - Deployment target >= 13 (mobile_scanner yêu cầu >= 12), nhưng không bao
+      giờ thấp hơn mức mà bản Flutter đang dùng yêu cầu — pod "Flutter" sẽ
+      không giải được nếu Podfile khai thấp hơn nó.
 
 Chạy lại nhiều lần được (idempotent).
 """
@@ -24,7 +26,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 MIN_SDK = 29
-IOS_TARGET = "13.0"
+
+# Sàn của dự án. Mức thực tế = max(sàn này, mức Flutter/Xcode template yêu cầu),
+# xem ios_deployment_target().
+IOS_TARGET_FLOOR = "13.0"
 
 
 def fail(message: str) -> None:
@@ -134,7 +139,53 @@ def patch_ios_plist() -> None:
     ok("Info.plist: thêm quyền camera + local network + ATS")
 
 
-def patch_ios_podfile() -> None:
+def _version_key(value: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", value)) or (0,)
+
+
+def ios_deployment_target() -> str:
+    """Mức iOS tối thiểu an toàn cho dự án.
+
+    Hardcode một con số là cái bẫy: mỗi lần Flutter nâng mức tối thiểu, `pod
+    install` sẽ báo "Specs satisfying the `Flutter` dependency were found, but
+    they required a higher minimum deployment target". Nên lấy mức cao nhất
+    trong: sàn dự án, MinimumOSVersion của AppFrameworkInfo.plist, dòng
+    `platform :ios` (kể cả đang bị comment) mà `flutter create` vừa sinh ra, và
+    IPHONEOS_DEPLOYMENT_TARGET trong project.pbxproj — ba nguồn sau đều do bản
+    Flutter/Xcode hiện tại quyết định.
+    """
+    candidates = [IOS_TARGET_FLOOR]
+
+    plist = ROOT / "ios/Flutter/AppFrameworkInfo.plist"
+    if plist.exists():
+        found = re.search(
+            r"<key>MinimumOSVersion</key>\s*<string>([\d.]+)</string>",
+            plist.read_text(encoding="utf-8"),
+        )
+        if found:
+            candidates.append(found.group(1))
+
+    podfile = ROOT / "ios/Podfile"
+    if podfile.exists():
+        found = re.search(
+            r"^\s*#?\s*platform :ios,\s*'([\d.]+)'",
+            podfile.read_text(encoding="utf-8"),
+            flags=re.M,
+        )
+        if found:
+            candidates.append(found.group(1))
+
+    pbxproj = ROOT / "ios/Runner.xcodeproj/project.pbxproj"
+    if pbxproj.exists():
+        candidates += re.findall(
+            r"IPHONEOS_DEPLOYMENT_TARGET = ([\d.]+);",
+            pbxproj.read_text(encoding="utf-8"),
+        )
+
+    return max(candidates, key=_version_key)
+
+
+def patch_ios_podfile(target: str) -> None:
     podfile = ROOT / "ios/Podfile"
     if not podfile.exists():
         fail("Không tìm thấy ios/Podfile (bỏ qua nếu không build iOS)")
@@ -146,25 +197,53 @@ def patch_ios_podfile() -> None:
     if re.search(r"^\s*#\s*platform :ios", text, flags=re.M):
         text = re.sub(
             r"^\s*#\s*platform :ios.*$",
-            f"platform :ios, '{IOS_TARGET}'",
+            f"platform :ios, '{target}'",
+            text,
+            count=1,
+            flags=re.M,
+        )
+    elif re.search(r"^platform :ios", text, flags=re.M):
+        text = re.sub(
+            r"^platform :ios.*$",
+            f"platform :ios, '{target}'",
             text,
             count=1,
             flags=re.M,
         )
     else:
-        text = re.sub(
-            r"^platform :ios.*$",
-            f"platform :ios, '{IOS_TARGET}'",
-            text,
-            count=1,
-            flags=re.M,
-        )
+        # Podfile không có dòng nào để thay — chèn lên đầu.
+        text = f"platform :ios, '{target}'\n" + text
 
     if text != original:
         podfile.write_text(text, encoding="utf-8")
-        ok(f"Podfile: platform :ios, '{IOS_TARGET}'")
+        ok(f"Podfile: platform :ios, '{target}'")
     else:
-        ok("Podfile: deployment target đã đúng")
+        ok(f"Podfile: deployment target đã là {target}")
+
+
+def patch_ios_project(target: str) -> None:
+    """Đồng bộ IPHONEOS_DEPLOYMENT_TARGET của Runner với Podfile.
+
+    Pod đã được post_install của Flutter nâng lên, nhưng target Runner thì
+    không — lệch hai bên là lỗi link lúc build.
+    """
+    pbxproj = ROOT / "ios/Runner.xcodeproj/project.pbxproj"
+    if not pbxproj.exists():
+        fail("Không tìm thấy ios/Runner.xcodeproj/project.pbxproj")
+        return
+
+    text = pbxproj.read_text(encoding="utf-8")
+    patched = re.sub(
+        r"IPHONEOS_DEPLOYMENT_TARGET = [\d.]+;",
+        f"IPHONEOS_DEPLOYMENT_TARGET = {target};",
+        text,
+    )
+
+    if patched != text:
+        pbxproj.write_text(patched, encoding="utf-8")
+        ok(f"project.pbxproj: IPHONEOS_DEPLOYMENT_TARGET = {target}")
+    else:
+        ok(f"project.pbxproj: deployment target đã là {target}")
 
 
 def main() -> None:
@@ -173,7 +252,9 @@ def main() -> None:
     patch_android_manifest()
     print("iOS:")
     patch_ios_plist()
-    patch_ios_podfile()
+    target = ios_deployment_target()
+    patch_ios_podfile(target)
+    patch_ios_project(target)
 
 
 if __name__ == "__main__":

@@ -119,7 +119,8 @@ jobs:
             flutter create --platforms=ios \
               --project-name manage3d --org click.quocan .
           fi
-          # Vá Info.plist (quyền camera, mạng LAN, ATS) + Podfile (target iOS 13).
+          # Vá Info.plist (quyền camera, mạng LAN, ATS) + đồng bộ deployment
+          # target giữa Podfile và Runner.xcodeproj.
           python3 tool/patch_platforms.py
 
       - name: Tải dependencies
