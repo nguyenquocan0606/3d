@@ -185,12 +185,12 @@ class _InfoTab extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         if (product.isCombo)
-          SectionCard(
+          const SectionCard(
             child: Row(
               children: [
-                const Icon(Icons.info_outline_rounded, color: AppColors.muted, size: 20),
-                const SizedBox(width: 10),
-                const Expanded(
+                Icon(Icons.info_outline_rounded, color: AppColors.muted, size: 20),
+                SizedBox(width: 10),
+                Expanded(
                   child: Text(
                     'Đây là sản phẩm combo. Tồn kho và giá vốn tự tính từ sản phẩm mẹ — '
                     'muốn nhập/xuất kho hãy mở sản phẩm mẹ.',

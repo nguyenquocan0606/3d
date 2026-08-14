@@ -128,7 +128,7 @@ class Spool {
   }
 
   String get materialLabel =>
-      [filamentBrand, filamentType].where((e) => e != null && e!.isNotEmpty).join(' ');
+      [filamentBrand, filamentType].where((e) => e != null && e.isNotEmpty).join(' ');
 
   /// Text dùng cho tìm kiếm phía client (backend chưa có filter).
   String get searchText =>

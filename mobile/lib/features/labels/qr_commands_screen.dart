@@ -152,9 +152,9 @@ class QrCommandsScreen extends ConsumerWidget {
             ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
               children: [
-                SectionCard(
+                const SectionCard(
                   child: Row(
-                    children: const [
+                    children: [
                       Icon(Icons.info_outline_rounded,
                           color: AppColors.muted, size: 20),
                       SizedBox(width: 10),
@@ -315,9 +315,9 @@ class _AmsSlotTab extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: [
-        SectionCard(
+        const SectionCard(
           child: Row(
-            children: const [
+            children: [
               Icon(Icons.lightbulb_outline_rounded,
                   color: AppColors.warning, size: 20),
               SizedBox(width: 10),

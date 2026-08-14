@@ -272,16 +272,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 26),
-          SectionCard(
+          const SectionCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Lưu ý vận hành',
                   style: TextStyle(fontWeight: FontWeight.w700),
                 ),
-                const SizedBox(height: 8),
-                const Text(
+                SizedBox(height: 8),
+                Text(
                   '• Máy chủ Next.js phải đang chạy thì app mới hoạt động.\n'
                   '• In tem chỉ được khi máy in USB cắm ở máy chủ.\n'
                   '• Ra khỏi xưởng cần VPN (Tailscale/WireGuard) hoặc domain đã mở.',

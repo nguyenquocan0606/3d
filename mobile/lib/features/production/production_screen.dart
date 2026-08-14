@@ -10,7 +10,6 @@ import '../../data/models/order.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/production_repository.dart';
 import '../scanner/scanner_screen.dart';
-import '../shell/quick_menu.dart';
 import 'order_check_screen.dart';
 import 'print_item_sheet.dart';
 

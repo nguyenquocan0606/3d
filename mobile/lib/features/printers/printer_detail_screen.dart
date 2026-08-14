@@ -59,12 +59,12 @@ class PrinterDetailScreen extends ConsumerWidget {
             _AmsPanel(printer: printer, live: live),
           ] else ...[
             const SizedBox(height: 16),
-            SectionCard(
+            const SectionCard(
               child: Row(
                 children: [
-                  const Icon(Icons.info_outline_rounded, color: AppColors.muted),
-                  const SizedBox(width: 12),
-                  const Expanded(
+                  Icon(Icons.info_outline_rounded, color: AppColors.muted),
+                  SizedBox(width: 12),
+                  Expanded(
                     child: Text(
                       'Máy in này chưa ghép tài khoản cloud nên không điều khiển được '
                       'từ xa. Ghép máy ở bản web (Máy in → Kết nối cloud).',

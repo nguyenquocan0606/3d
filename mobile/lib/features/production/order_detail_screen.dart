@@ -5,7 +5,6 @@ import '../../core/format/formatters.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../../data/models/order.dart';
-import '../../data/providers.dart';
 import '../../data/repositories/label_repository.dart';
 import '../../data/repositories/production_repository.dart';
 import 'print_item_sheet.dart';

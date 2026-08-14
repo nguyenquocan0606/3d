@@ -126,7 +126,7 @@ class _WeighSheetState extends ConsumerState<WeighSheet> {
         ),
       ),
     );
-    if (code == null || !mounted) return;
+    if (code == null || !context.mounted) return;
 
     final saved = await _save(silent: true);
     if (!saved || !mounted) return;
@@ -215,7 +215,7 @@ class _WeighSheetState extends ConsumerState<WeighSheet> {
                 FilledButton.icon(
                   onPressed: _saving ? null : () async {
                     final ok = await _save();
-                    if (ok && mounted) Navigator.pop(context);
+                    if (ok && context.mounted) Navigator.pop(context);
                   },
                   icon: _saving
                       ? const SizedBox(

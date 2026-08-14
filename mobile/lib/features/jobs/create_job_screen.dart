@@ -169,7 +169,7 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                       builder: (_) => const ScannerScreen(title: 'Quét QR máy in'),
                     ),
                   );
-                  if (code == null || !mounted) return;
+                  if (code == null || !context.mounted) return;
                   final normalized = code.replaceAll('-', '').toUpperCase();
                   Printer? found;
                   for (final printer in printers) {

@@ -154,12 +154,12 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: [
-          SectionCard(
+          const SectionCard(
             child: Row(
               children: [
-                const Icon(Icons.print_rounded, color: AppColors.indigoLight),
-                const SizedBox(width: 12),
-                const Expanded(
+                Icon(Icons.print_rounded, color: AppColors.indigoLight),
+                SizedBox(width: 12),
+                Expanded(
                   child: Text(
                     'Tem được in bằng máy XPrinter cắm ở máy chủ. Điện thoại chỉ gửi '
                     'lệnh — máy chủ phải đang bật.',

@@ -98,7 +98,7 @@ class AppShell extends ConsumerWidget {
                 ),
               ),
             ),
-            Positioned(
+            const Positioned(
               top: 0,
               left: 0,
               right: 0,
