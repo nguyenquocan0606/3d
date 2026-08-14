@@ -7,6 +7,7 @@ enum ScanKind {
   printerSlot,
   peiSheet,
   order,
+  bulkOrder,
   printItem,
   storeProduct,
   command,
@@ -80,6 +81,7 @@ class CodeNormalizer {
     this.storeCodes = const {},
     this.peiSheetIds = const {},
     this.orderCodes = const {},
+    this.bulkOrderCodes = const {},
     this.colorNames = const {},
   });
 
@@ -96,6 +98,9 @@ class CodeNormalizer {
 
   /// Mã đơn hàng (`orderCode`) và uuid đơn — dùng cho tem mã đơn dán trên thùng.
   final Set<String> orderCodes;
+
+  /// Mã đơn sản xuất số lượng lớn (`SLL-001`) và uuid đơn.
+  final Set<String> bulkOrderCodes;
 
   /// Tên màu nhựa có thật trong DB, để khôi phục dấu từ tem `CLR-` đã bị bỏ dấu.
   final Set<String> colorNames;
@@ -183,6 +188,11 @@ class CodeNormalizer {
     final order = _match(orderCodes, normalized);
     if (order != null) {
       return ScannedCode(raw: raw, kind: ScanKind.order, id: order);
+    }
+
+    final bulkOrder = _match(bulkOrderCodes, normalized);
+    if (bulkOrder != null) {
+      return ScannedCode(raw: raw, kind: ScanKind.bulkOrder, id: bulkOrder);
     }
 
     return ScannedCode(raw: raw, kind: ScanKind.unknown);

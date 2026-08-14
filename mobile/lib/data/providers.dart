@@ -2,12 +2,14 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'models/bulk_order.dart';
 import 'models/filament.dart';
 import 'models/inventory.dart';
 import 'models/location.dart';
 import 'models/order.dart';
 import 'models/printer.dart';
 import 'models/store.dart';
+import 'repositories/bulk_repository.dart';
 import 'repositories/filament_repository.dart';
 import 'repositories/inventory_repository.dart';
 import 'repositories/location_repository.dart';
@@ -180,6 +182,33 @@ final printItemsProvider =
 final peiSheetsProvider = FutureProvider<List<PeiSheet>>(
   (ref) => ref.watch(productionRepositoryProvider).fetchPeiSheets(),
 );
+
+/// Đơn sản xuất số lượng lớn (SLL). Backend trả kèm toàn bộ lượt in nên màn chi
+/// tiết đọc thẳng từ đây, không cần gọi lại API.
+class BulkOrdersNotifier extends AsyncNotifier<List<BulkOrder>> {
+  @override
+  Future<List<BulkOrder>> build() => ref.watch(bulkRepositoryProvider).fetchOrders();
+
+  Future<void> refresh() async {
+    state = await AsyncValue.guard(
+      () => ref.read(bulkRepositoryProvider).fetchOrders(),
+    );
+  }
+}
+
+final bulkOrdersProvider =
+    AsyncNotifierProvider<BulkOrdersNotifier, List<BulkOrder>>(
+  BulkOrdersNotifier.new,
+);
+
+/// Tra 1 đơn SLL trong danh sách đã tải (màn chi tiết bám theo id).
+final bulkOrderByIdProvider = Provider.family<BulkOrder?, String>((ref, id) {
+  final orders = ref.watch(bulkOrdersProvider).valueOrNull ?? const [];
+  for (final order in orders) {
+    if (order.id == id) return order;
+  }
+  return null;
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Kiểm kho & lệnh in

@@ -25,6 +25,8 @@ class Routes {
   static const createJob = '/create-job';
   static const printHistory = '/print-history';
   static const pei = '/pei';
+  static const bulkOrders = '/bulk-orders';
+  static const createBulkOrder = '/create-bulk-order';
   static const orderCheck = '/order-check';
   static const settings = '/settings';
 
@@ -36,4 +38,5 @@ class Routes {
   static String storeDetail(String id) => '/product/${Uri.encodeComponent(id)}';
   static String colorDetail(String name) => '/color/${Uri.encodeComponent(name)}';
   static String peiSheetDetail(String id) => '/pei-sheet/${Uri.encodeComponent(id)}';
+  static String bulkOrderDetail(String id) => '/bulk-order/${Uri.encodeComponent(id)}';
 }

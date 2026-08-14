@@ -132,6 +132,13 @@ const quickActionGroups = <QuickActionGroup>[
       route: Routes.production,
     ),
     QuickAction(
+      icon: Icons.inventory_rounded,
+      title: 'Đơn SLL',
+      subtitle: 'Sản xuất số lượng lớn, quẹt mã từng lượt PEI',
+      color: AppColors.info,
+      route: Routes.bulkOrders,
+    ),
+    QuickAction(
       icon: Icons.fact_check_rounded,
       title: 'Kiểm hàng đóng gói',
       subtitle: 'Quét tem đối chiếu đủ hàng trong thùng',

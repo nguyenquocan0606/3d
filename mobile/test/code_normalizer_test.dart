@@ -9,6 +9,7 @@ void main() {
     storeCodes: {'SP-260814-A3F2K'},
     peiSheetIds: {'8f14e45f-ceea-467a-9575-1f0f3e2a9b10'},
     orderCodes: {'DH001', 'b3c1a2d4-0000-4000-8000-000000000001'},
+    bulkOrderCodes: {'SLL-001'},
     colorNames: {'Đỏ', 'Trắng', 'Xanh dương'},
   );
 
@@ -75,6 +76,11 @@ void main() {
     test('mã đơn hàng', () {
       expect(normalizer.classify('DH001').kind, ScanKind.order);
       expect(normalizer.classify('DH001').id, 'DH001');
+    });
+
+    test('mã đơn sản xuất số lượng lớn', () {
+      expect(normalizer.classify('SLL-001').kind, ScanKind.bulkOrder);
+      expect(normalizer.classify('SLL001').id, 'SLL-001');
     });
 
     test('hàng hóa cửa hàng khớp nguyên văn', () {

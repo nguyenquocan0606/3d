@@ -36,6 +36,11 @@ class ProductionScreen extends ConsumerWidget {
           ),
           actions: [
             IconButton(
+              tooltip: 'Đơn sản xuất số lượng lớn',
+              onPressed: () => context.push(Routes.bulkOrders),
+              icon: const Icon(Icons.inventory_rounded),
+            ),
+            IconButton(
               tooltip: 'Mâm in PEI',
               onPressed: () => context.push(Routes.pei),
               icon: const Icon(Icons.grid_view_rounded),

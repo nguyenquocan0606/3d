@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/routes.dart';
+import 'features/bulk/bulk_order_detail_screen.dart';
+import 'features/bulk/bulk_orders_screen.dart';
+import 'features/bulk/create_bulk_order_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/inventory/inventory_screen.dart';
 import 'features/jobs/create_job_screen.dart';
@@ -131,6 +134,14 @@ final appRouter = GoRouter(
       builder: (context, state) => const OrderCheckScreen(),
     ),
     GoRoute(
+      path: Routes.bulkOrders,
+      builder: (context, state) => const BulkOrdersScreen(),
+    ),
+    GoRoute(
+      path: Routes.createBulkOrder,
+      builder: (context, state) => const CreateBulkOrderScreen(),
+    ),
+    GoRoute(
       path: Routes.settings,
       builder: (context, state) => const SettingsScreen(),
     ),
@@ -163,6 +174,10 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/pei-sheet/:id',
       builder: (context, state) => PeiSheetDetailScreen(sheetId: _param(state)),
+    ),
+    GoRoute(
+      path: '/bulk-order/:id',
+      builder: (context, state) => BulkOrderDetailScreen(orderId: _param(state)),
     ),
   ],
 );

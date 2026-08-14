@@ -2,14 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../data/models/bulk_order.dart';
 import '../../data/models/filament.dart';
 import '../../data/models/order.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/filament_repository.dart';
 import '../../data/repositories/production_repository.dart';
+import '../../features/bulk/bulk_scan.dart';
 import '../../features/production/print_item_sheet.dart';
 import '../../features/scanner/scanner_screen.dart';
+import '../api/api_client.dart';
 import '../routes.dart';
+import '../widgets/common.dart';
 import 'code_normalizer.dart';
 import 'scan_mode.dart';
 
@@ -24,6 +28,7 @@ final codeNormalizerProvider = Provider<CodeNormalizer>((ref) {
   final store = ref.watch(storeProvider).valueOrNull;
   final sheets = ref.watch(peiSheetsProvider).valueOrNull ?? const <PeiSheet>[];
   final orders = ref.watch(ordersProvider).valueOrNull ?? const <Order>[];
+  final bulkOrders = ref.watch(bulkOrdersProvider).valueOrNull ?? const <BulkOrder>[];
 
   return CodeNormalizer(
     locationIds: locations.map((e) => e.id).toSet(),
@@ -35,6 +40,12 @@ final codeNormalizerProvider = Provider<CodeNormalizer>((ref) {
     peiSheetIds: sheets.map((e) => e.id).toSet(),
     orderCodes: {
       for (final order in orders) ...[
+        if (order.orderCode != null) order.orderCode!,
+        order.id,
+      ],
+    },
+    bulkOrderCodes: {
+      for (final order in bulkOrders) ...[
         if (order.orderCode != null) order.orderCode!,
         order.id,
       ],
@@ -63,7 +74,8 @@ class ScanFailure implements Exception {
 /// | Slot AMS `PRT-xx-L1..4` | Bật chế độ gán cuộn vào line đó |
 /// | Mâm `PEI-<id>` | Chi tiết mâm + miếng in trên mâm |
 /// | Mã đơn hàng | Chi tiết đơn + tiến độ tem |
-/// | Barcode 8 số | Bảng đổi trạng thái miếng in |
+/// | Mã đơn SLL `SLL-xxx` | Chi tiết đơn số lượng lớn + các lượt PEI |
+/// | Barcode 8 số | Bảng đổi trạng thái miếng in, hoặc check-in/out lượt SLL |
 /// | Mã hàng hóa `SP-` | Chi tiết hàng hóa + nhập/xuất kho |
 ///
 /// Ngoại lệ duy nhất phá thứ tự này là **chế độ gán hàng loạt** (scanMode): khi
@@ -122,6 +134,10 @@ class ScanRouter {
 
       case ScanKind.order:
         if (context.mounted) context.push(Routes.orderDetail(scanned.id!));
+        return null;
+
+      case ScanKind.bulkOrder:
+        if (context.mounted) context.push(Routes.bulkOrderDetail(scanned.id!));
         return null;
 
       case ScanKind.storeProduct:
@@ -197,16 +213,38 @@ class ScanRouter {
   }
 
   /// Tem miếng in: mở bảng đổi trạng thái nhanh (pending → printing → completed).
+  ///
+  /// Lượt in của đơn SLL dùng **cùng dạng mã 8 chữ số** nhưng nằm ở bảng khác, nên
+  /// tra không ra miếng in thì thử tiếp sang lượt in trước khi báo lỗi.
   Future<String?> _handlePrintItem(BuildContext context, String barcode) async {
     final PrintItem item;
     try {
       item = await _ref.read(productionRepositoryProvider).fetchPrintItem(barcode);
     } catch (_) {
-      throw ScanFailure('Không tìm thấy miếng in mã $barcode.');
+      return _handleBulkRun(context, barcode);
     }
     if (!context.mounted) return null;
     await showPrintItemSheet(context, item);
     return null;
+  }
+
+  /// Lượt in SLL: quẹt lần 1 bấm giờ bắt đầu, lần 2 chốt in xong.
+  Future<String?> _handleBulkRun(BuildContext context, String barcode) async {
+    final String message;
+    try {
+      message = await scanBulkRun(_ref, barcode);
+    } on ApiException catch (error) {
+      // 404 = mã không thuộc cả hai bảng; các lỗi khác (VD lượt đã in xong) là
+      // thông báo nghiệp vụ, giữ nguyên câu của backend.
+      if (error.statusCode == 404) {
+        throw ScanFailure('Không tìm thấy miếng in hay lượt in mã $barcode.');
+      }
+      throw ScanFailure(error.message);
+    }
+    // Màn quét 1 lần sẽ pop ngay nên thông báo trả về bị bỏ qua — bắn thêm toast
+    // ở tầng ScaffoldMessenger để người quét vẫn thấy kết quả.
+    if (context.mounted) showToast(context, message);
+    return message;
   }
 }
 
@@ -220,7 +258,8 @@ Future<void> openGlobalScanner(BuildContext context, WidgetRef ref) async {
       builder: (_) => Consumer(
         builder: (context, ref, _) => ScannerScreen(
           title: 'Quét mã',
-          hint: 'Cuộn nhựa · Tem màu · Kho · Máy in · Mâm PEI · Đơn hàng · Hàng hóa',
+          hint: 'Cuộn nhựa · Tem màu · Kho · Máy in · Mâm PEI · Đơn hàng · '
+              'Lượt in SLL · Hàng hóa',
           continuous: continuous,
           onCode: (code) => ScanRouter(ref).handle(context, code),
         ),
