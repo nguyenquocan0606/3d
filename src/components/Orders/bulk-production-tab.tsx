@@ -13,6 +13,8 @@ import {
   RotateCcw,
   ChevronDown,
   ChevronRight,
+  Pencil,
+  X,
 } from 'lucide-react';
 import { chiaLuotIn, dinhDangThoiLuong } from '@/utils/bulk-production';
 
@@ -82,6 +84,18 @@ export default function BulkProductionTab() {
   // Thứ tự trong mảng = thứ tự chia lượt, nên giữ nguyên trình tự người dùng bấm chọn
   const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
+
+  // Sửa đơn: chỉ phần thông tin, KHÔNG đụng tới số lượng / máy in vì lượt đã chia
+  // xong và đã in tem mã vạch — muốn chia lại thì xóa đơn rồi tạo lại.
+  const [editing, setEditing] = useState<BulkOrder | null>(null);
+  const [editForm, setEditForm] = useState({
+    orderCode: '',
+    customerName: '',
+    productName: '',
+    note: '',
+    status: 'pending',
+  });
+  const [saving, setSaving] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -200,6 +214,48 @@ export default function BulkProductionTab() {
       notify('Lỗi kết nối khi tạo đơn');
     }
     setCreating(false);
+  };
+
+  // ── Sửa đơn ──
+  const batDauSua = (order: BulkOrder) => {
+    setEditing(order);
+    setShowForm(false);
+    setEditForm({
+      orderCode: order.orderCode || '',
+      customerName: order.customerName || '',
+      productName: order.productName,
+      note: order.note || '',
+      status: order.status,
+    });
+  };
+
+  const handleUpdate = async () => {
+    if (!editing) return;
+    if (!editForm.productName.trim()) return notify('Vui lòng nhập tên sản phẩm');
+
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/bulk-orders/${editing.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderCode: editForm.orderCode.trim(),
+          customerName: editForm.customerName.trim() || 'Khách lẻ',
+          productName: editForm.productName.trim(),
+          note: editForm.note.trim() || null,
+          status: editForm.status,
+        }),
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        notify('Đã lưu thay đổi', 'success');
+        setEditing(null);
+        fetchData();
+      } else notify(data.message || 'Lỗi lưu đơn');
+    } catch {
+      notify('Lỗi kết nối khi lưu đơn');
+    }
+    setSaving(false);
   };
 
   const handleDeleteOrder = (order: BulkOrder) => {
@@ -446,6 +502,92 @@ export default function BulkProductionTab() {
         </div>
       )}
 
+      {/* Form sửa đơn */}
+      {editing && (
+        <div className="bg-white dark:bg-[#111827] border border-indigo-500/40 rounded-2xl p-6 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+              Sửa đơn — {editing.productName}
+            </h3>
+            <button onClick={() => setEditing(null)} className="text-slate-500 hover:text-rose-500">
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">Mã đơn</label>
+              <input
+                value={editForm.orderCode}
+                onChange={(e) => setEditForm({ ...editForm, orderCode: e.target.value })}
+                placeholder="VD: SLL-001"
+                className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">Khách hàng</label>
+              <input
+                value={editForm.customerName}
+                onChange={(e) => setEditForm({ ...editForm, customerName: e.target.value })}
+                placeholder="Khách lẻ"
+                className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">Tên sản phẩm *</label>
+              <input
+                value={editForm.productName}
+                onChange={(e) => setEditForm({ ...editForm, productName: e.target.value })}
+                className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">Ghi chú</label>
+              <input
+                value={editForm.note}
+                onChange={(e) => setEditForm({ ...editForm, note: e.target.value })}
+                placeholder="Màu nhựa, yêu cầu riêng..."
+                className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">Trạng thái</label>
+              <select
+                value={editForm.status}
+                onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
+              >
+                <option value="pending">Chờ in</option>
+                <option value="printing">Đang chạy</option>
+                <option value="completed">Xong</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+            Tổng số con, số con mỗi mâm và danh sách máy không sửa được: lượt in đã chia và
+            tem mã vạch đã in ra rồi — muốn chia lại thì xóa đơn và tạo đơn mới. Trạng thái
+            đơn cũng sẽ tự tính lại theo các lượt mỗi khi quẹt mã.
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleUpdate}
+              disabled={saving}
+              className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl shadow-lg shadow-indigo-500/20 disabled:opacity-50"
+            >
+              {saving ? 'Đang lưu...' : 'Lưu thay đổi'}
+            </button>
+            <button
+              onClick={() => setEditing(null)}
+              className="px-6 py-2.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-semibold rounded-xl"
+            >
+              Hủy
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Danh sách đơn */}
       {loading ? (
         <div className="text-center text-slate-500 py-10">Đang tải...</div>
@@ -516,6 +658,15 @@ export default function BulkProductionTab() {
                     className="flex items-center gap-1 text-xs text-slate-500 hover:text-indigo-500 cursor-pointer"
                   >
                     <Tag size={13} /> In toàn bộ tem
+                  </span>
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      batDauSua(order);
+                    }}
+                    className="flex items-center gap-1 text-xs text-slate-500 hover:text-indigo-500 cursor-pointer"
+                  >
+                    <Pencil size={13} /> Sửa
                   </span>
                   <span
                     onClick={(e) => {
