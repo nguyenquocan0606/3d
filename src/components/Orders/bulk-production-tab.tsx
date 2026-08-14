@@ -1,0 +1,675 @@
+'use client';
+
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  Boxes,
+  ScanBarcode,
+  Plus,
+  Trash2,
+  Printer as PrinterIcon,
+  Tag,
+  Play,
+  Check,
+  RotateCcw,
+  ChevronDown,
+  ChevronRight,
+} from 'lucide-react';
+import { chiaLuotIn, dinhDangThoiLuong } from '@/utils/bulk-production';
+
+type BulkRun = {
+  id: string;
+  printerId: string | null;
+  printerName: string;
+  seq: number;
+  peiIndex: number;
+  quantity: number;
+  status: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+};
+
+type BulkOrder = {
+  id: string;
+  orderCode: string | null;
+  customerName: string | null;
+  productName: string;
+  totalQuantity: number;
+  perSheetQty: number;
+  note: string | null;
+  status: string;
+  createdAt: string;
+  runs: BulkRun[];
+};
+
+type Printer = { id: string; name: string; model?: string | null };
+
+const notify = (message: string, type: 'success' | 'error' | 'info' = 'error') => {
+  window.dispatchEvent(new CustomEvent('appToast', { detail: { message, type } }));
+};
+
+/** "13/08 14:32" — bảng có nhiều dòng nên cắt bớt năm và giây cho đỡ rối. */
+const dinhDangMoc = (iso: string | null) => {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const soConDaXong = (runs: BulkRun[]) =>
+  runs.filter((r) => r.status === 'completed').reduce((s, r) => s + r.quantity, 0);
+
+export default function BulkProductionTab() {
+  const [orders, setOrders] = useState<BulkOrder[]>([]);
+  const [printers, setPrinters] = useState<Printer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [scannedId, setScannedId] = useState('');
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [collapsedPrinters, setCollapsedPrinters] = useState<string[]>([]);
+
+  // Form tạo đơn
+  const [form, setForm] = useState({
+    orderCode: '',
+    customerName: '',
+    productName: '',
+    totalQuantity: '',
+    perSheetQty: '',
+    note: '',
+  });
+  // Thứ tự trong mảng = thứ tự chia lượt, nên giữ nguyên trình tự người dùng bấm chọn
+  const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
+  const [creating, setCreating] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [orderRes, printerRes] = await Promise.all([
+        fetch('/api/bulk-orders'),
+        fetch('/api/printers'),
+      ]);
+      const orderData = await orderRes.json();
+      const printerData = await printerRes.json();
+      if (orderData.status === 'success') {
+        setOrders(orderData.data);
+        setSelectedOrderId((hienTai) =>
+          hienTai && orderData.data.some((o: BulkOrder) => o.id === hienTai)
+            ? hienTai
+            : orderData.data[0]?.id ?? null
+        );
+      }
+      if (printerData.status === 'success') setPrinters(printerData.data);
+    } catch {
+      notify('Không tải được dữ liệu sản xuất SLL');
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      fetchData();
+    });
+  }, [fetchData]);
+
+  // ── Quẹt mã check-in / check-out ──
+  const xuLyQuetMa = useCallback(
+    async (code: string) => {
+      const ma = code.trim();
+      if (!ma) return;
+      setScannedId('');
+      try {
+        const res = await fetch('/api/bulk-runs/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: ma }),
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+          notify(data.message, 'success');
+          setSelectedOrderId(data.data.run.orderId);
+          fetchData();
+        } else {
+          notify(data.message || 'Lỗi khi quẹt mã');
+        }
+      } catch {
+        notify('Lỗi kết nối khi quẹt mã');
+      }
+    },
+    [fetchData]
+  );
+
+  // Máy quét HID toàn cục: page.tsx bắn event này khi đang ở tab Sản xuất và mã toàn số
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const code = (event as CustomEvent<string>).detail;
+      if (code) xuLyQuetMa(code);
+    };
+    window.addEventListener('productionNumericScanned', handler);
+    return () => window.removeEventListener('productionNumericScanned', handler);
+  }, [xuLyQuetMa]);
+
+  // ── Tạo đơn ──
+  const previewLuots = useMemo(() => {
+    const tong = Number(form.totalQuantity);
+    const moiMam = Number(form.perSheetQty);
+    if (!tong || !moiMam || selectedPrinterIds.length === 0) return null;
+    const luots = chiaLuotIn(tong, moiMam, selectedPrinterIds.length);
+    if (luots.length === 0) return null;
+    const theoMay = selectedPrinterIds.map(
+      (_, idx) => luots.filter((l) => l.printerIndex === idx).length
+    );
+    return { soLuot: luots.length, theoMay, duCuoi: luots[luots.length - 1].quantity };
+  }, [form.totalQuantity, form.perSheetQty, selectedPrinterIds]);
+
+  const toggleMay = (id: string) => {
+    setSelectedPrinterIds((cu) => (cu.includes(id) ? cu.filter((x) => x !== id) : [...cu, id]));
+  };
+
+  const handleCreate = async () => {
+    if (!form.productName.trim()) return notify('Vui lòng nhập tên sản phẩm');
+    if (!Number(form.totalQuantity)) return notify('Vui lòng nhập tổng số con');
+    if (!Number(form.perSheetQty)) return notify('Vui lòng nhập số con mỗi mâm PEI');
+    if (selectedPrinterIds.length === 0) return notify('Vui lòng chọn ít nhất 1 máy in');
+
+    setCreating(true);
+    try {
+      const res = await fetch('/api/bulk-orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...form,
+          totalQuantity: Number(form.totalQuantity),
+          perSheetQty: Number(form.perSheetQty),
+          printerIds: selectedPrinterIds,
+        }),
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        notify(data.message, 'success');
+        setForm({ orderCode: '', customerName: '', productName: '', totalQuantity: '', perSheetQty: '', note: '' });
+        setSelectedPrinterIds([]);
+        setShowForm(false);
+        await fetchData();
+        setSelectedOrderId(data.data.id);
+      } else {
+        notify(data.message || 'Lỗi tạo đơn');
+      }
+    } catch {
+      notify('Lỗi kết nối khi tạo đơn');
+    }
+    setCreating(false);
+  };
+
+  const handleDeleteOrder = (order: BulkOrder) => {
+    window.dispatchEvent(
+      new CustomEvent('appConfirm', {
+        detail: {
+          title: 'Xóa đơn sản xuất SLL',
+          message: `Bạn có chắc muốn xóa đơn "${order.productName}" cùng ${order.runs.length} lượt in? Toàn bộ mốc check-in/check-out đã ghi sẽ mất.`,
+          onConfirm: async () => {
+            const res = await fetch(`/api/bulk-orders/${order.id}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.status === 'success') {
+              notify('Đã xóa đơn', 'success');
+              fetchData();
+            } else notify(data.message || 'Lỗi xóa đơn');
+          },
+        },
+      })
+    );
+  };
+
+  // ── Sửa tay 1 lượt (quẹt nhầm / máy hỏng) ──
+  const capNhatLuot = async (run: BulkRun, body: Record<string, unknown>, thongBao: string) => {
+    const res = await fetch(`/api/bulk-runs/${run.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (data.status === 'success') {
+      notify(thongBao, 'success');
+      fetchData();
+    } else notify(data.message || 'Lỗi cập nhật lượt in');
+  };
+
+  // ── In tem lượt ──
+  const inTem = async (runs: BulkRun[], order: BulkOrder) => {
+    if (runs.length === 0) return;
+    const jobs = runs.map((r) => ({
+      qrCode: r.id,
+      labelData: {
+        line1: r.id,
+        line2: order.productName,
+        line3: `${r.printerName} PEI ${r.peiIndex} - ${r.quantity} con`,
+      },
+    }));
+    try {
+      const res = await fetch('/api/print-jobs/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobs }),
+      });
+      const data = await res.json();
+      if (data.status === 'success') notify(`Đã gửi lệnh in ${jobs.length} tem`, 'success');
+      else notify(data.message || 'Lỗi in tem');
+    } catch {
+      notify('Lỗi khi gửi lệnh in');
+    }
+  };
+
+  const selectedOrder = orders.find((o) => o.id === selectedOrderId) || null;
+
+  // Gom lượt theo máy, giữ thứ tự máy xuất hiện lần đầu (= thứ tự chọn lúc tạo đơn)
+  const runsTheoMay = useMemo(() => {
+    if (!selectedOrder) return [];
+    const nhom = new Map<string, { printerName: string; runs: BulkRun[] }>();
+    for (const run of selectedOrder.runs) {
+      const key = run.printerId || run.printerName;
+      if (!nhom.has(key)) nhom.set(key, { printerName: run.printerName, runs: [] });
+      nhom.get(key)!.runs.push(run);
+    }
+    return Array.from(nhom.entries()).map(([key, v]) => ({ key, ...v }));
+  }, [selectedOrder]);
+
+  return (
+    <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+          <Boxes className="text-indigo-400" />
+          Sản Xuất Số Lượng Lớn (theo lượt PEI)
+        </h2>
+        <button
+          onClick={() => setShowForm((v) => !v)}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl shadow-lg shadow-indigo-500/20"
+        >
+          <Plus size={16} /> {showForm ? 'Đóng form' : 'Tạo đơn SLL'}
+        </button>
+      </div>
+
+      {/* Ô quẹt mã check-in / check-out */}
+      <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xl">
+        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+          Quẹt mã lượt in — lần 1 là <span className="text-amber-500 font-semibold">bắt đầu in</span>, lần 2 là{' '}
+          <span className="text-emerald-500 font-semibold">in xong</span>
+        </label>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            xuLyQuetMa(scannedId);
+          }}
+          className="flex gap-2"
+        >
+          <div className="relative flex-1">
+            <ScanBarcode className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+            <input
+              autoFocus
+              type="text"
+              value={scannedId}
+              onChange={(e) => setScannedId(e.target.value)}
+              placeholder="Nhập hoặc quét mã lượt in (VD: 12345678)..."
+              className="w-full bg-slate-50 dark:bg-[#1f2937] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-xl pl-10 pr-4 py-3 focus:outline-hidden focus:border-indigo-500"
+            />
+          </div>
+          <button type="submit" className="px-6 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl">
+            Ghi nhận
+          </button>
+        </form>
+      </div>
+
+      {/* Form tạo đơn */}
+      {showForm && (
+        <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Thông tin đơn</h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">Mã đơn (tùy chọn)</label>
+              <input
+                value={form.orderCode}
+                onChange={(e) => setForm({ ...form, orderCode: e.target.value })}
+                placeholder="VD: SLL-001"
+                className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">Khách hàng</label>
+              <input
+                value={form.customerName}
+                onChange={(e) => setForm({ ...form, customerName: e.target.value })}
+                placeholder="Khách lẻ"
+                className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">Tên sản phẩm *</label>
+              <input
+                value={form.productName}
+                onChange={(e) => setForm({ ...form, productName: e.target.value })}
+                placeholder="VD: Móc khóa rồng"
+                className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">Tổng số con *</label>
+              <input
+                type="number"
+                min={1}
+                value={form.totalQuantity}
+                onChange={(e) => setForm({ ...form, totalQuantity: e.target.value })}
+                placeholder="VD: 5000"
+                className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">Số con mỗi mâm PEI *</label>
+              <input
+                type="number"
+                min={1}
+                value={form.perSheetQty}
+                onChange={(e) => setForm({ ...form, perSheetQty: e.target.value })}
+                placeholder="VD: 50"
+                className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">Ghi chú</label>
+              <input
+                value={form.note}
+                onChange={(e) => setForm({ ...form, note: e.target.value })}
+                placeholder="Màu nhựa, yêu cầu riêng..."
+                className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-slate-500 dark:text-slate-400 mb-2">
+              Chọn máy in chạy đơn này * (số thứ tự = thứ tự nhận lượt)
+            </label>
+            {printers.length === 0 ? (
+              <div className="text-xs text-slate-500 py-3">Chưa có máy in nào trong hệ thống</div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {printers.map((p) => {
+                  const idx = selectedPrinterIds.indexOf(p.id);
+                  const chon = idx >= 0;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => toggleMay(p.id)}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-all text-left ${
+                        chon
+                          ? 'bg-indigo-500/10 border-indigo-500 text-indigo-600 dark:text-indigo-300'
+                          : 'bg-slate-100 dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-indigo-400'
+                      }`}
+                    >
+                      <span
+                        className={`w-5 h-5 shrink-0 rounded-full text-[10px] font-bold flex items-center justify-center ${
+                          chon ? 'bg-indigo-600 text-white' : 'bg-slate-300 dark:bg-slate-700 text-slate-500'
+                        }`}
+                      >
+                        {chon ? idx + 1 : '·'}
+                      </span>
+                      <span className="truncate">{p.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {previewLuots && (
+            <div className="bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-4 text-sm text-slate-600 dark:text-slate-300">
+              Sẽ chia thành{' '}
+              <span className="font-bold text-indigo-600 dark:text-indigo-300">{previewLuots.soLuot} lượt in</span> trên{' '}
+              {selectedPrinterIds.length} máy —{' '}
+              {previewLuots.theoMay
+                .map((n, i) => `${printers.find((p) => p.id === selectedPrinterIds[i])?.name}: ${n} lượt`)
+                .join(' · ')}
+              {previewLuots.duCuoi !== Number(form.perSheetQty) && (
+                <span className="text-amber-500"> (lượt cuối chỉ {previewLuots.duCuoi} con)</span>
+              )}
+            </div>
+          )}
+
+          <button
+            onClick={handleCreate}
+            disabled={creating}
+            className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl shadow-lg shadow-indigo-500/20 disabled:opacity-50"
+          >
+            {creating ? 'Đang tạo...' : 'Tạo đơn & chia lượt'}
+          </button>
+        </div>
+      )}
+
+      {/* Danh sách đơn */}
+      {loading ? (
+        <div className="text-center text-slate-500 py-10">Đang tải...</div>
+      ) : orders.length === 0 ? (
+        <div className="text-center text-slate-500 py-10 bg-white dark:bg-[#111827] rounded-2xl border border-slate-200 dark:border-slate-800">
+          Chưa có đơn sản xuất số lượng lớn nào
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {orders.map((order) => {
+            const xong = soConDaXong(order.runs);
+            const phanTram = order.totalQuantity > 0 ? Math.round((xong / order.totalQuantity) * 100) : 0;
+            const dangChon = order.id === selectedOrderId;
+            return (
+              <button
+                key={order.id}
+                onClick={() => setSelectedOrderId(order.id)}
+                className={`text-left bg-white dark:bg-[#111827] border rounded-2xl p-5 transition-all ${
+                  dangChon
+                    ? 'border-indigo-500 shadow-lg shadow-indigo-500/10'
+                    : 'border-slate-200 dark:border-slate-800 hover:border-indigo-400'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="min-w-0">
+                    <div className="font-bold text-slate-900 dark:text-white truncate">{order.productName}</div>
+                    <div className="text-xs text-slate-500 truncate">
+                      {order.orderCode ? `${order.orderCode} · ` : ''}
+                      {order.customerName || 'Khách lẻ'}
+                    </div>
+                  </div>
+                  <span
+                    className={`shrink-0 px-2 py-1 rounded text-xs border ${
+                      order.status === 'completed'
+                        ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                        : order.status === 'printing'
+                          ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                          : 'bg-slate-200 dark:bg-slate-800 text-slate-500 border-slate-300 dark:border-slate-700'
+                    }`}
+                  >
+                    {order.status === 'completed' ? 'Xong' : order.status === 'printing' ? 'Đang chạy' : 'Chờ in'}
+                  </span>
+                </div>
+
+                <div className="text-xs text-slate-500 mb-2">
+                  {order.runs.length} lượt · {order.perSheetQty} con/mâm
+                </div>
+
+                <div className="h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden mb-1">
+                  <div
+                    className={`h-full rounded-full transition-all ${phanTram === 100 ? 'bg-emerald-500' : 'bg-indigo-500'}`}
+                    style={{ width: `${phanTram}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-slate-600 dark:text-slate-300 font-semibold">
+                    {xong.toLocaleString('vi-VN')} / {order.totalQuantity.toLocaleString('vi-VN')} con
+                  </span>
+                  <span className="text-slate-500">{phanTram}%</span>
+                </div>
+
+                <div className="flex gap-2 mt-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      inTem(order.runs, order);
+                    }}
+                    className="flex items-center gap-1 text-xs text-slate-500 hover:text-indigo-500 cursor-pointer"
+                  >
+                    <Tag size={13} /> In toàn bộ tem
+                  </span>
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteOrder(order);
+                    }}
+                    className="flex items-center gap-1 text-xs text-slate-500 hover:text-rose-500 cursor-pointer ml-auto"
+                  >
+                    <Trash2 size={13} /> Xóa
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Bảng chi tiết theo máy / lượt PEI */}
+      {selectedOrder && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+            Chi tiết lượt in — {selectedOrder.productName}
+            {selectedOrder.note && <span className="ml-2 text-xs font-normal text-slate-500">({selectedOrder.note})</span>}
+          </h3>
+
+          {runsTheoMay.map(({ key, printerName, runs }) => {
+            const dongLai = collapsedPrinters.includes(key);
+            const xongMay = runs.filter((r) => r.status === 'completed').length;
+            return (
+              <div
+                key={key}
+                className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden"
+              >
+                <div className="flex items-center gap-3 px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800">
+                  <button
+                    onClick={() =>
+                      setCollapsedPrinters((cu) =>
+                        cu.includes(key) ? cu.filter((k) => k !== key) : [...cu, key]
+                      )
+                    }
+                    className="text-slate-500 hover:text-indigo-500"
+                  >
+                    {dongLai ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
+                  </button>
+                  <PrinterIcon size={16} className="text-indigo-400" />
+                  <span className="font-semibold text-slate-900 dark:text-white">{printerName}</span>
+                  <span className="text-xs text-slate-500">
+                    {xongMay}/{runs.length} lượt xong ·{' '}
+                    {runs.reduce((s, r) => s + r.quantity, 0).toLocaleString('vi-VN')} con
+                  </span>
+                  <button
+                    onClick={() => inTem(runs, selectedOrder)}
+                    className="ml-auto flex items-center gap-1 text-xs text-slate-500 hover:text-indigo-500"
+                  >
+                    <Tag size={13} /> In tem máy này
+                  </button>
+                </div>
+
+                {!dongLai && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="border-b border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-400">
+                          <th className="px-4 py-2.5">Mã lượt</th>
+                          <th className="px-4 py-2.5">PEI</th>
+                          <th className="px-4 py-2.5">Số con</th>
+                          <th className="px-4 py-2.5">Trạng thái</th>
+                          <th className="px-4 py-2.5">Bắt đầu in</th>
+                          <th className="px-4 py-2.5">In xong</th>
+                          <th className="px-4 py-2.5">Thời lượng</th>
+                          <th className="px-4 py-2.5 text-right">Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                        {runs.map((run) => (
+                          <tr
+                            key={run.id}
+                            className="text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/30"
+                          >
+                            <td className="px-4 py-2.5 font-mono font-bold text-slate-900 dark:text-white">{run.id}</td>
+                            <td className="px-4 py-2.5">
+                              <span className="px-2 py-0.5 bg-slate-200 dark:bg-slate-800 rounded text-xs font-semibold">
+                                PEI {run.peiIndex}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2.5">{run.quantity}</td>
+                            <td className="px-4 py-2.5">
+                              {run.status === 'completed' && (
+                                <span className="px-2 py-1 bg-emerald-500/10 text-emerald-500 rounded text-xs border border-emerald-500/20">
+                                  Xong
+                                </span>
+                              )}
+                              {run.status === 'printing' && (
+                                <span className="px-2 py-1 bg-amber-500/10 text-amber-500 rounded text-xs border border-amber-500/20">
+                                  Đang in
+                                </span>
+                              )}
+                              {run.status === 'pending' && (
+                                <span className="px-2 py-1 bg-slate-200 dark:bg-slate-800 text-slate-500 rounded text-xs border border-slate-300 dark:border-slate-700">
+                                  Chờ in
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-2.5 text-xs">{dinhDangMoc(run.startedAt)}</td>
+                            <td className="px-4 py-2.5 text-xs">{dinhDangMoc(run.finishedAt)}</td>
+                            <td className="px-4 py-2.5 text-xs font-semibold">
+                              {dinhDangThoiLuong(run.startedAt, run.finishedAt)}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <div className="flex items-center justify-end gap-1">
+                                <button
+                                  onClick={() => inTem([run], selectedOrder)}
+                                  title="In tem lượt này"
+                                  className="p-1.5 text-slate-500 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
+                                >
+                                  <Tag size={14} />
+                                </button>
+                                {run.status !== 'completed' && (
+                                  <button
+                                    onClick={() => xuLyQuetMa(run.id)}
+                                    title={run.status === 'pending' ? 'Ghi nhận bắt đầu in' : 'Ghi nhận in xong'}
+                                    className={`p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 ${
+                                      run.status === 'pending'
+                                        ? 'text-amber-500 hover:text-amber-400'
+                                        : 'text-emerald-500 hover:text-emerald-400'
+                                    }`}
+                                  >
+                                    {run.status === 'pending' ? <Play size={14} /> : <Check size={14} />}
+                                  </button>
+                                )}
+                                {run.status !== 'pending' && (
+                                  <button
+                                    onClick={() =>
+                                      capNhatLuot(run, { status: 'pending' }, `Đã đặt lại lượt ${run.id} về chờ in`)
+                                    }
+                                    title="Đặt lại về chờ in (quẹt nhầm)"
+                                    className="p-1.5 text-slate-500 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
+                                  >
+                                    <RotateCcw size={14} />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,32 @@
+version: '3.8'
+
+# LƯU Ý: App còn cần 1 MQTT broker có websocket listener trên cổng 9001
+# (next.config.ts rewrite /mqtt → 127.0.0.1:9001 cho trạm cân ESP).
+# Trên máy hiện tại broker là mosquitto chạy bằng systemd (KHÔNG nằm trong compose này).
+# Nếu dựng máy mới không có mosquitto, bỏ comment service dưới đây:
+#
+#  mosquitto:
+#    image: eclipse-mosquitto:2
+#    ports:
+#      - "127.0.0.1:9001:9001"
+#      - "127.0.0.1:1883:1883"
+#    volumes:
+#      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+#    restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: 3d_manage_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: mysecretpassword
+      POSTGRES_DB: filament_db
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

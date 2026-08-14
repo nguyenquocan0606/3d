@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "StoreProduct" ADD COLUMN     "tyLeLoiNhuan" DOUBLE PRECISION NOT NULL DEFAULT 40;

@@ -1,0 +1,314 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Location {
+  id        String   @id
+  name      String
+  spools    Spool[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Filament {
+  id        String   @id @default(uuid())
+  type      String   // PLA, PETG, ABS, TPU...
+  colorName String   // Đỏ, Đen, Trắng...
+  colorHex  String?  // Mã màu hex hiển thị lên UI (e.g. #FF0000)
+  brand     String?  // Hãng sản xuất (e.g. eSun, Creality)
+  spools    Spool[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([type, colorName, brand])
+}
+
+model Printer {
+  id        String   @id       // Mã ID máy in (VD: PRT-ENDER3)
+  name      String             // Tên hiển thị (VD: Ender 3 V3)
+  model     String?            // Model máy (VD: Ender 3 V3 SE)
+  status    String   @default("idle") // idle, printing, maintenance
+  spools    Spool[]
+  tasks     Task3D[]
+  peiSheets PeiSheet[]
+  printItems PrintItem[] @relation("PrinterToPrintItem")
+  bulkRuns  BulkRun[]  @relation("PrinterToBulkRun")
+  cloudAccountId String?
+  cloudPrinterId String?   // Lưu trữ ID thực tế trên Cloud
+  cloudAccount   CloudAccount? @relation(fields: [cloudAccountId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([cloudAccountId])
+}
+
+model CloudAccount {
+  id        String    @id @default(uuid())
+  provider  String    // e.g., "anycubic", "bambulab"
+  email     String?   // Email đăng nhập hoặc username
+  token     String    @db.Text // Token xác thực (XX-Token cho Anycubic, Access Token cho loại khác)
+  isActive  Boolean   @default(true)
+  printers  Printer[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([provider, email])
+}
+
+model Spool {
+  id                 String    @id // Người dùng tự nhập ID duy nhất
+  filamentId         String
+  filament           Filament  @relation(fields: [filamentId], references: [id], onDelete: Cascade)
+  locationId         String?   // Vị trí kho lưu trữ (nullable)
+  location           Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  printerId          String?   // Máy in đang sử dụng cuộn này (nullable)
+  printer            Printer?  @relation(fields: [printerId], references: [id], onDelete: SetNull)
+  printerSlot        Int?      // Slot của máy in (VD: 1, 2, 3, 4 cho AMS Bambu Lab)
+  initialWeightG     Float     // Khối lượng nhựa ban đầu (e.g. 1000g)
+  emptySpoolWeightG  Float     @default(220) // Khối lượng vỏ cuộn nhựa
+  remainingWeightG   Float     // Khối lượng nhựa còn lại (chỉ tính nhựa)
+  status             String    @default("active") // active, depleted, archived
+  taskUsages         Task3DSpoolUsage[]
+  inventoryItems     InventoryItem[]
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([filamentId])
+  @@index([locationId])
+  @@index([printerId])
+  @@index([status])
+}
+
+model PrintJob {
+  id        String   @id @default(uuid())
+  qrCode    String   // Nội dung QR code (VD: LOC-01, C-PLA-R-01)
+  label     String   // Nội dung chữ in đi kèm (VD: Kho chứa đồ, Nhựa PLA Đỏ)
+  status    String   @default("pending") // pending, completed, failed
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Task3D {
+  id               String   @id @default(uuid())
+  printerId        String?
+  printer          Printer? @relation(fields: [printerId], references: [id], onDelete: SetNull)
+  name             String?  // Optional name for the print object
+  status           String   @default("printing") // printing, completed, failed, cancelled
+  estimatedEndTime DateTime?
+  durationMinutes  Int?
+  usages           Task3DSpoolUsage[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([printerId])
+  @@index([status])
+}
+
+model Task3DSpoolUsage {
+  id          String   @id @default(uuid())
+  taskId      String
+  task        Task3D   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  spoolId     String?
+  spool       Spool?   @relation(fields: [spoolId], references: [id], onDelete: SetNull)
+  usedWeightG Float
+  createdAt   DateTime @default(now())
+
+  @@index([taskId])
+  @@index([spoolId])
+}
+
+model InventorySession {
+  id        String          @id @default(uuid())
+  active    Boolean         @default(true)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  items     InventoryItem[]
+}
+
+model InventoryItem {
+  id        String           @id @default(uuid())
+  sessionId String
+  session   InventorySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  spoolId   String
+  spool     Spool            @relation(fields: [spoolId], references: [id], onDelete: Cascade)
+  scannedAt DateTime         @default(now())
+
+  @@unique([sessionId, spoolId])
+  @@index([sessionId])
+}
+
+model PeiSheet {
+  id        String      @id @default(uuid())
+  name      String      // e.g., "Mâm PEI Số 1"
+  printerId String?     // Gắn mâm này vào máy in nào (nếu đang in)
+  printer   Printer?    @relation(fields: [printerId], references: [id], onDelete: SetNull)
+  items     PrintItem[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([printerId])
+}
+
+model Order {
+  id           String         @id @default(uuid())
+  orderCode    String?        @unique
+  customerName String?
+  status       String         @default("pending") // pending, printing, completed
+  products     OrderProduct[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+model OrderProduct {
+  id        String      @id @default(uuid())
+  orderId   String
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  name      String      // Tên SP (VD: Hộp A)
+  quantity  Int         // Số lượng bộ/hộp (VD: 5 hộp)
+  price     Float       @default(0) // Giá bán của sản phẩm
+  items     PrintItem[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([orderId])
+}
+
+// ── Hàng hóa cửa hàng (tab Store) ──
+// Dữ liệu do client quản lý toàn bộ (kể cả ngày giờ dạng ISO string) và đồng bộ
+// nguyên bộ qua API — các cột ngày giữ String để round-trip chính xác với client.
+model StoreProduct {
+  id            String  @id
+  maQR          String  @unique
+  ten           String
+  danhMuc       String  @default("Chưa phân loại")
+  // Giá vốn + % lợi nhuận là 2 giá trị gốc do người dùng nhập; gia/giaBanLe/giaKhuyenMai đều tính tự
+  // động từ chúng (xem src/utils/dinh-gia-hang-hoa.ts) — không cho sửa tay để tránh lệch công thức.
+  giaVon        Float   @default(0) // giá vốn (cost)
+  tyLeLoiNhuan  Float   @default(40) // % lợi nhuận dùng tính giá bán lẻ (mặc định 40%)
+  gia           Float   @default(0) // giá bán trên sàn (TikTok Shop / Shopee) — tự tính từ giaVon
+  giaBanLe      Float   @default(0) // giá bán lẻ ngoài sàn = giaVon x (1 + tyLeLoiNhuan/100)
+  giaKhuyenMai  Float   @default(0) // giá niêm yết để set KM 25% trên sàn thì về đúng `gia`
+  soLuong       Int     @default(0)
+  donVi         String  @default("cái")
+  nguongCanhBao Int     @default(5)
+  nhaCungCap    String  @default("")
+  ghiChu        String  @default("")
+  thongTinRieng Json?
+  anhDaiDien    String? @db.Text // thumbnail nhỏ (nén) của anh[0] — dùng hiển thị avatar mà không cần tải mảng anh đầy đủ
+  anh           Json? // mảng AnhSanPham (base64) — dữ liệu cá nhân, dung lượng nhỏ
+  tepIn         Json? // mảng TepIn (base64) — file thiết kế/in kèm hàng hóa (PDF, STL, 3MF, gcode...)
+  // Bản rút gọn của `anh`/`tepIn`: giữ {id, ten, loai, dungLuong}, BỎ `duLieu` (base64).
+  // Tồn tại để GET danh sách không phải đọc 2 cột nặng phía trên (tổng có thể vài trăm MB → mất ~7s
+  // chỉ để rồi vứt bỏ base64 trong JS). Luôn ghi kèm mỗi khi ghi `anh`/`tepIn` — xem PUT
+  // /api/store-products.
+  anhMeta       Json?
+  tepInMeta     Json?
+  lichSu        Json? // mảng LichSuKho
+  ngayTao       String
+  ngayCapNhat   String
+
+  // Sản phẩm con combo (gộp 1/2/5 cái) tự sinh từ sản phẩm mẹ — mã SKU = mã mẹ + "-1"/"-2"/"-5".
+  // Xóa sản phẩm mẹ thì xóa luôn các combo con (Cascade).
+  parentId     String?
+  parent       StoreProduct?  @relation("SanPhamCombo", fields: [parentId], references: [id], onDelete: Cascade)
+  children     StoreProduct[] @relation("SanPhamCombo")
+  soLuongCombo Int? // số cái gộp trong 1 combo con (1/2/5) — null nếu là sản phẩm mẹ (không phải combo)
+  // Hệ số nhân giá combo so với giá của CHÍNH hàng này, dạng {"1":1.5,"2":2,"5":4}. Chỉ có ý nghĩa
+  // ở sản phẩm mẹ; sửa trực tiếp trên panel chi tiết. null = dùng HE_SO_COMBO_MAC_DINH.
+  heSoCombo    Json?
+
+  @@index([parentId])
+}
+
+// Cấu hình tab Store (danh sách cột thông tin tùy biến)
+model StoreConfig {
+  id          String @id @default("main")
+  truongRieng Json
+}
+
+// ── Tích hợp MISA eShop (đồng bộ nhập kho) ──
+// Singleton (id cố định "default") lưu credential gọi API amisapp.misa.vn.
+// bearerToken hết hạn theo thời gian đăng nhập trên MISA nên cần trang Cài đặt để cập nhật lại thủ công.
+model MisaCredential {
+  id               String    @id @default("default")
+  bearerToken      String?   @db.Text
+  cookie           String?   @db.Text
+  deviceId         String?
+  msBid            String?
+  dbid             String?
+  tid              String?
+  tco              String?
+  brid             String?
+  lastCheckedAt    DateTime?
+  lastCheckOk      Boolean?
+  lastCheckMessage String?
+  updatedAt        DateTime  @updatedAt
+}
+
+model PrintItem {
+  id          String        @id // Mã Barcode (chỉ dùng số)
+  productId   String
+  product     OrderProduct  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name        String        // Tên miếng in (VD: Nắp hộp)
+  status      String        @default("pending") // pending, printing, completed
+  isChecked   Boolean       @default(false)
+  peiSheetId  String?
+  peiSheet    PeiSheet?     @relation(fields: [peiSheetId], references: [id], onDelete: SetNull)
+  printerId   String?
+  printer     Printer?      @relation("PrinterToPrintItem", fields: [printerId], references: [id], onDelete: SetNull)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([productId])
+  @@index([peiSheetId])
+  @@index([printerId])
+  @@index([status])
+}
+
+// ── Sản xuất số lượng lớn (chế độ 2) ──
+// Khác mode cũ (Order → OrderProduct → PrintItem, mỗi CON 1 mã vạch): đơn lớn hàng nghìn con thì
+// không dán tem từng con nổi. Ở đây đơn vị quản lý là 1 LƯỢT IN (1 mâm PEI đầy) — mỗi lượt 1 mã vạch,
+// quẹt trước khi in = check-in, quẹt sau khi in = check-out. Không dùng chung bảng nào với mode cũ.
+model BulkOrder {
+  id            String    @id @default(uuid())
+  orderCode     String?   @unique // mã đơn để tra cứu (VD: SLL-001)
+  customerName  String?
+  productName   String    // tên sản phẩm đang chạy (VD: "Móc khóa rồng")
+  totalQuantity Int       // tổng số con phải in cho cả đơn
+  perSheetQty   Int       // số con in được trên 1 mâm PEI
+  note          String?
+  status        String    @default("pending") // pending, printing, completed
+  runs          BulkRun[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status])
+}
+
+// 1 lượt in = 1 mâm PEI trên 1 máy. Số lượt = ceil(totalQuantity / perSheetQty), chia vòng tròn cho
+// các máy được chọn lúc tạo đơn nên mỗi máy có PEI 1, PEI 2, PEI 3... theo `peiIndex`.
+model BulkRun {
+  id           String    @id // Mã vạch 8 số (không trùng với PrintItem.id — xem utils/barcode.ts)
+  orderId      String
+  order        BulkOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  printerId    String?
+  printer      Printer?  @relation("PrinterToBulkRun", fields: [printerId], references: [id], onDelete: SetNull)
+  printerName  String    // tên máy chốt lúc chia lượt — giữ lại để bảng lịch sử vẫn đọc được nếu máy bị xóa
+  seq          Int       // thứ tự lượt trong cả đơn (1..N)
+  peiIndex     Int       // lượt PEI thứ mấy TRÊN MÁY này (1, 2, 3...)
+  quantity     Int       // số con của lượt này (lượt cuối có thể lẻ, ít hơn perSheetQty)
+  status       String    @default("pending") // pending, printing, completed
+  startedAt    DateTime? // mốc quẹt check-in
+  finishedAt   DateTime? // mốc quẹt check-out
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([orderId])
+  @@index([printerId])
+  @@index([status])
+}

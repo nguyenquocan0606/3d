@@ -1,0 +1,54 @@
+@import "tailwindcss";
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #090d16;
+  --foreground: #f8fafc;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* qr-scanner (Nimiq) styling */
+.scan-region-highlight-svg {
+  stroke: #6366f1 !important; /* Indigo-500 */
+  stroke-width: 4px !important;
+  fill: rgba(99, 102, 241, 0.05) !important;
+}
+
+.code-outline-highlight {
+  stroke: #10b981 !important; /* Emerald-500 */
+  stroke-width: 3px !important;
+  fill: rgba(16, 185, 129, 0.1) !important;
+}
+
+/* Custom scrollbar for dark theme */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Tab "Hàng hóa cửa hàng" dùng thẳng biến thể `dark:` như các tab khác,
+   không còn cần lớp .store-dark-panel ép màu bằng !important. */

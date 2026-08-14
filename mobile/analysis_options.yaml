@@ -1,0 +1,16 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  errors:
+    # Chuỗi tiếng Việt trong UI là cố ý, không tách i18n ở phiên bản này.
+    avoid_print: warning
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+
+linter:
+  rules:
+    prefer_single_quotes: true
+    require_trailing_commas: false
+    use_super_parameters: true
+    avoid_redundant_argument_values: false

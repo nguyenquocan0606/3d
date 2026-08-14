@@ -1,0 +1,24 @@
+# Sinh bởi flutter create — chạy tool/setup_platforms.sh để tạo lại
+/android/
+/ios/
+/linux/
+/macos/
+/windows/
+/web/
+
+# Flutter/Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.swp
+.DS_Store
