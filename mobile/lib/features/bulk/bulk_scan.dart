@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/format/formatters.dart';
 import '../../core/scan/code_normalizer.dart';
 import '../../core/scan/scan_router.dart';
+import '../../core/theme/app_theme.dart';
+import '../../core/widgets/common.dart';
 import '../../data/models/bulk_order.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/bulk_repository.dart';
@@ -24,11 +27,148 @@ Future<String> startBulkRun(WidgetRef ref, String runId, String printerId) async
   return bulkScanMessage(result);
 }
 
-/// Chốt in xong — không cần quẹt máy.
-Future<String> finishBulkRun(WidgetRef ref, String runId) async {
-  final result = await ref.read(bulkRepositoryProvider).scanRun(runId);
+/// Chốt in xong — không cần quẹt máy, nhưng có thể kèm số con lỗi của mâm.
+Future<String> finishBulkRun(
+  WidgetRef ref,
+  String runId, {
+  int defectQuantity = 0,
+}) async {
+  final result = await ref
+      .read(bulkRepositoryProvider)
+      .scanRun(runId, defectQuantity: defectQuantity);
   await ref.read(bulkOrdersProvider.notifier).refresh();
   return bulkScanMessage(result);
+}
+
+/// Hỏi "mâm này có miếng nào lỗi không" rồi mới chốt in xong.
+///
+/// Số lỗi bị trừ khỏi hàng tốt của đơn, và là căn cứ để bấm "In miếng lỗi" sinh
+/// lượt in bù — nên phải hỏi ngay lúc thợ còn đứng cạnh mâm, không để ghi sau.
+///
+/// Trả về null khi người dùng đóng bảng mà không chọn gì.
+Future<String?> finishBulkRunWithDefects(
+  BuildContext context,
+  WidgetRef ref,
+  BulkRun run,
+) async {
+  final defects = await askDefectQuantity(context, run);
+  if (defects == null) return null;
+  return finishBulkRun(ref, run.id, defectQuantity: defects);
+}
+
+/// Bảng hỏi số miếng lỗi. Trả về số lỗi (0 = không lỗi), null nếu bỏ qua.
+Future<int?> askDefectQuantity(BuildContext context, BulkRun run) {
+  return showModalBottomSheet<int>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: AppColors.surfaceAlt,
+    builder: (_) => _DefectSheet(run: run),
+  );
+}
+
+class _DefectSheet extends StatefulWidget {
+  const _DefectSheet({required this.run});
+
+  final BulkRun run;
+
+  @override
+  State<_DefectSheet> createState() => _DefectSheetState();
+}
+
+class _DefectSheetState extends State<_DefectSheet> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final value = int.tryParse(_controller.text.trim()) ?? 0;
+    if (value <= 0) {
+      showToast(context, 'Nhập số con lỗi lớn hơn 0.', isError: true);
+      return;
+    }
+    if (value > widget.run.quantity) {
+      showToast(context, 'Lượt này chỉ có ${widget.run.quantity} con.', isError: true);
+      return;
+    }
+    Navigator.pop(context, value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final run = widget.run;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        16,
+        18,
+        16,
+        MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${run.printerName} · PEI ${run.peiIndex}',
+            style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Mâm ${run.quantity} con — có miếng nào lỗi không?',
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 18),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, 0),
+            icon: const Icon(Icons.check_rounded),
+            label: Text('Không lỗi — xong ${run.quantity} con'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.success,
+              minimumSize: const Size.fromHeight(AppSize.touchTarget),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    labelText: 'Số con lỗi',
+                    isDense: true,
+                  ),
+                  onSubmitted: (_) => _submit(),
+                ),
+              ),
+              const SizedBox(width: 10),
+              FilledButton(
+                onPressed: _submit,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.danger,
+                  minimumSize: const Size(120, AppSize.touchTarget),
+                ),
+                child: const Text('Ghi nhận lỗi'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Số lỗi bị trừ khỏi hàng tốt của đơn. In bù bằng nút "In miếng lỗi" ở màn '
+            'chi tiết đơn.',
+            style: TextStyle(fontSize: 12.5, color: AppColors.muted, height: 1.4),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 String bulkScanMessage(BulkScanResult result) {
@@ -95,11 +235,11 @@ Future<void> openBulkRunScanner(BuildContext context, WidgetRef ref) {
   final session = BulkRunScanSession();
   return Navigator.of(context).push<void>(
     MaterialPageRoute(
-      builder: (_) => ScannerScreen(
+      builder: (scanContext) => ScannerScreen(
         title: 'Quẹt mã lượt in',
         hint: 'Bắt đầu in: quét mã lượt rồi quét tem máy in · In xong: quét mã lượt',
         continuous: true,
-        onCode: (code) => session.handle(ref, code),
+        onCode: (code) => session.handle(scanContext, ref, code),
       ),
     ),
   );
@@ -115,7 +255,11 @@ class BulkRunScanSession {
 
   bool get waitingForPrinter => _runId != null;
 
-  Future<String> handle(WidgetRef ref, String rawCode) async {
+  Future<String?> handle(
+    BuildContext context,
+    WidgetRef ref,
+    String rawCode,
+  ) async {
     final code = rawCode.trim();
 
     if (_runId != null) {
@@ -144,7 +288,8 @@ class BulkRunScanSession {
         return 'Lượt PEI ${run.peiIndex} (${run.quantity} con) — '
             'quét tiếp tem MÁY IN để bắt đầu.';
       case BulkStatus.printing:
-        return finishBulkRun(ref, run.id);
+        if (!context.mounted) return null;
+        return finishBulkRunWithDefects(context, ref, run);
       case BulkStatus.completed:
         throw ScanFailure(
           'Lượt ${run.printerName} · PEI ${run.peiIndex} đã in xong lúc '

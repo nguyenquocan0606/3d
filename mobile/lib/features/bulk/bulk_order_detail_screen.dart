@@ -67,6 +67,10 @@ class BulkOrderDetailScreen extends ConsumerWidget {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, AppSize.listBottomInset),
               children: [
                 _Summary(order: order),
+                if (order.pendingRework > 0) ...[
+                  const SizedBox(height: 10),
+                  _ReworkButton(order: order),
+                ],
                 const SizedBox(height: 14),
                 for (final group in order.runsByPrinter) ...[
                   _PrinterGroup(order: order, group: group),
@@ -130,11 +134,83 @@ class _Summary extends StatelessWidget {
             value: '${order.doneRuns}/${order.runs.length} lượt · '
                 '${order.perSheetQty} con/mâm',
           ),
+          if (order.defectQuantity > 0)
+            InfoRow(
+              label: 'Miếng lỗi',
+              value: '${order.defectQuantity} con'
+                  '${order.pendingRework > 0 ? ' · cần in bù ${order.pendingRework}' : ' · đã có lượt bù đủ'}',
+              valueColor: AppColors.danger,
+            ),
           InfoRow(label: 'Mã đơn', value: order.orderCode ?? '—'),
           InfoRow(label: 'Khách hàng', value: order.displayCustomer),
           if (order.note != null) InfoRow(label: 'Ghi chú', value: order.note!),
           InfoRow(label: 'Tạo lúc', value: Fmt.dateTime(order.createdAt)),
         ],
+      ),
+    );
+  }
+}
+
+/// Gom số lỗi của cả đơn thành lượt in bù rồi in tem cho chính các lượt đó.
+class _ReworkButton extends ConsumerStatefulWidget {
+  const _ReworkButton({required this.order});
+
+  final BulkOrder order;
+
+  @override
+  ConsumerState<_ReworkButton> createState() => _ReworkButtonState();
+}
+
+class _ReworkButtonState extends ConsumerState<_ReworkButton> {
+  bool _busy = false;
+
+  Future<void> _run() async {
+    final order = widget.order;
+    final ok = await confirmAction(
+      context,
+      title: 'In miếng lỗi',
+      message: 'Tạo lượt in bù cho ${order.pendingRework} miếng lỗi và gửi lệnh in tem '
+          'cho các lượt đó?',
+      confirmLabel: 'Tạo lượt bù',
+      destructive: false,
+    );
+    if (!ok) return;
+
+    setState(() => _busy = true);
+    try {
+      final idCu = order.runs.map((r) => r.id).toSet();
+      final capNhat = await ref.read(bulkRepositoryProvider).createRework(order.id);
+      final luotMoi = capNhat.runs.where((r) => !idCu.contains(r.id)).toList();
+
+      await ref.read(bulkOrdersProvider.notifier).refresh();
+      if (mounted) {
+        await _printLabels(context, ref, capNhat, luotMoi);
+      }
+      if (mounted) {
+        showToast(context, 'Đã thêm ${luotMoi.length} lượt in bù.');
+      }
+    } catch (error) {
+      if (mounted) showToast(context, '$error', isError: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton.icon(
+      onPressed: _busy ? null : _run,
+      icon: _busy
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.restart_alt_rounded),
+      label: Text('In miếng lỗi (${widget.order.pendingRework} con)'),
+      style: FilledButton.styleFrom(
+        backgroundColor: AppColors.danger,
+        minimumSize: const Size.fromHeight(AppSize.touchTarget),
       ),
     );
   }
@@ -210,7 +286,7 @@ class _RunRowState extends ConsumerState<_RunRow> {
     try {
       final message = widget.run.status == BulkStatus.pending
           ? await startBulkRunByScanningPrinter(context, ref, widget.run)
-          : await finishBulkRun(ref, widget.run.id);
+          : await finishBulkRunWithDefects(context, ref, widget.run);
       if (mounted && message != null) showToast(context, message);
     } catch (error) {
       if (mounted) showToast(context, '$error', isError: true);
@@ -264,10 +340,24 @@ class _RunRowState extends ConsumerState<_RunRow> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
+                    if (run.isRework) ...[
+                      const SizedBox(width: 6),
+                      const StatusChip(label: 'BÙ', color: AppColors.danger, dense: true),
+                    ],
                     const SizedBox(width: 8),
-                    Text(
-                      'PEI ${run.peiIndex} · ${run.quantity} con',
-                      style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                    Expanded(
+                      child: Text(
+                        'PEI ${run.peiIndex} · ${run.quantity} con'
+                        '${run.defectQuantity > 0 ? ' · lỗi ${run.defectQuantity}' : ''}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: run.defectQuantity > 0
+                              ? AppColors.danger
+                              : AppColors.muted,
+                        ),
+                      ),
                     ),
                   ],
                 ),

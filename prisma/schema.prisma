@@ -302,6 +302,8 @@ model BulkRun {
   seq          Int       // thứ tự lượt trong cả đơn (1..N)
   peiIndex     Int       // lượt PEI thứ mấy TRÊN MÁY này (1, 2, 3...)
   quantity     Int       // số con của lượt này (lượt cuối có thể lẻ, ít hơn perSheetQty)
+  defectQuantity Int     @default(0) // số con lỗi, nhập lúc quẹt "in xong"
+  isRework     Boolean   @default(false) // lượt in bù cho hàng lỗi (không nằm trong kế hoạch gốc)
   status       String    @default("pending") // pending, printing, completed
   startedAt    DateTime? // mốc quẹt check-in
   finishedAt   DateTime? // mốc quẹt check-out

@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { chiaLuotIn, chiaLuotInTheoMay, trangThaiDon, dinhDangThoiLuong } from '../bulk-production';
+import {
+  chiaLuotIn,
+  chiaLuotInTheoMay,
+  trangThaiDon,
+  dinhDangThoiLuong,
+  tongSoLoi,
+  canBuBaoNhieu,
+  soHangTot,
+  sucChuaTheoMayTuLuot,
+  type LuotDeTongHop,
+} from '../bulk-production';
 
 describe('chiaLuotIn', () => {
   it('chia hết: 200 con, 50 con/mâm, 2 máy → 4 lượt đều 50 con', () => {
@@ -82,5 +92,56 @@ describe('dinhDangThoiLuong', () => {
   it('thiếu mốc hoặc mốc ngược → gạch ngang', () => {
     expect(dinhDangThoiLuong(null, new Date())).toBe('—');
     expect(dinhDangThoiLuong(new Date('2026-08-13T10:00:00Z'), new Date('2026-08-13T08:00:00Z'))).toBe('—');
+  });
+});
+
+describe('tổng hợp miếng lỗi', () => {
+  const luot = (p: Partial<LuotDeTongHop>): LuotDeTongHop => ({
+    printerId: 'may-1',
+    quantity: 50,
+    defectQuantity: 0,
+    isRework: false,
+    status: 'completed',
+    peiIndex: 1,
+    ...p,
+  });
+
+  it('hàng tốt trừ số lỗi, lượt chưa xong không tính', () => {
+    const runs = [
+      luot({ quantity: 50, defectQuantity: 3 }),
+      luot({ quantity: 50, defectQuantity: 0 }),
+      luot({ quantity: 50, status: 'printing' }),
+    ];
+    expect(soHangTot(runs)).toBe(97);
+    expect(tongSoLoi(runs)).toBe(3);
+  });
+
+  it('lượt bù đã tạo thì trừ khỏi số cần bù, bấm hai lần không đẻ thêm', () => {
+    const runs = [
+      luot({ quantity: 50, defectQuantity: 8 }),
+      luot({ quantity: 8, isRework: true, status: 'pending' }),
+    ];
+    expect(canBuBaoNhieu(runs)).toBe(0);
+  });
+
+  it('còn lỗi chưa bù thì ra đúng phần thiếu', () => {
+    const runs = [
+      luot({ quantity: 50, defectQuantity: 8 }),
+      luot({ quantity: 50, defectQuantity: 2 }),
+      luot({ quantity: 4, isRework: true, status: 'completed' }),
+    ];
+    expect(canBuBaoNhieu(runs)).toBe(6);
+  });
+
+  it('suy lại máy + sức chứa mâm từ các lượt, lấy lượt đầy nhất', () => {
+    const runs = [
+      luot({ printerId: 'A', quantity: 100 }),
+      luot({ printerId: 'B', quantity: 40 }),
+      luot({ printerId: 'A', quantity: 10 }), // lượt lẻ cuối
+    ];
+    expect(sucChuaTheoMayTuLuot(runs)).toEqual({
+      printerIds: ['A', 'B'],
+      sucChua: { A: 100, B: 40 },
+    });
   });
 });

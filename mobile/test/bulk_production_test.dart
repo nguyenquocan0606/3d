@@ -53,15 +53,58 @@ void main() {
   });
 
   group('BulkOrder', () {
-    BulkRun run(String id, int quantity, BulkStatus status) => BulkRun(
+    BulkRun run(
+      String id,
+      int quantity,
+      BulkStatus status, {
+      int defects = 0,
+      bool isRework = false,
+    }) =>
+        BulkRun(
           id: id,
           orderId: 'o1',
           printerName: 'PRT-01',
           seq: 1,
           peiIndex: 1,
           quantity: quantity,
+          defectQuantity: defects,
+          isRework: isRework,
           status: status,
         );
+
+    test('miếng lỗi bị trừ khỏi hàng tốt và gom lại để in bù', () {
+      final order = BulkOrder(
+        id: 'o1',
+        productName: 'Móc khóa rồng',
+        totalQuantity: 100,
+        perSheetQty: 50,
+        status: BulkStatus.printing,
+        runs: [
+          run('1', 50, BulkStatus.completed, defects: 3),
+          run('2', 50, BulkStatus.completed, defects: 2),
+        ],
+      );
+
+      expect(order.doneQuantity, 95);
+      expect(order.defectQuantity, 5);
+      expect(order.pendingRework, 5);
+    });
+
+    test('lượt bù đã tạo thì không còn cần in bù nữa', () {
+      final order = BulkOrder(
+        id: 'o1',
+        productName: 'X',
+        totalQuantity: 100,
+        perSheetQty: 50,
+        status: BulkStatus.printing,
+        runs: [
+          run('1', 50, BulkStatus.completed, defects: 5),
+          run('2', 5, BulkStatus.pending, isRework: true),
+        ],
+      );
+
+      expect(order.pendingRework, 0);
+    });
 
     test('chỉ lượt đã xong mới tính vào tiến độ', () {
       final order = BulkOrder(

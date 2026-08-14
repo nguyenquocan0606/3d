@@ -30,6 +30,8 @@ class BulkRun {
     required this.peiIndex,
     required this.quantity,
     required this.status,
+    this.defectQuantity = 0,
+    this.isRework = false,
     this.printerId,
     this.startedAt,
     this.finishedAt,
@@ -45,9 +47,21 @@ class BulkRun {
   final int seq;
   final int peiIndex;
   final int quantity;
+
+  /// Số con lỗi, nhập lúc quẹt "in xong".
+  final int defectQuantity;
+
+  /// Lượt in bù cho hàng lỗi — không nằm trong kế hoạch chia ban đầu.
+  final bool isRework;
+
   final BulkStatus status;
+
   final DateTime? startedAt;
   final DateTime? finishedAt;
+
+  /// Hàng tốt của lượt này.
+  int get goodQuantity =>
+      quantity - defectQuantity < 0 ? 0 : quantity - defectQuantity;
 
   /// Thời gian in thực tế của lượt, null khi chưa quẹt đủ 2 đầu.
   Duration? get elapsed {
@@ -64,6 +78,8 @@ class BulkRun {
         seq: asInt(json['seq']),
         peiIndex: asInt(json['peiIndex']),
         quantity: asInt(json['quantity']),
+        defectQuantity: asInt(json['defectQuantity']),
+        isRework: asBool(json['isRework']),
         status: BulkStatus.from(asStringOrNull(json['status'])),
         startedAt: asDate(json['startedAt']),
         finishedAt: asDate(json['finishedAt']),
@@ -98,10 +114,24 @@ class BulkOrder {
 
   String get displayCustomer => customerName ?? 'Khách lẻ';
 
-  /// Chỉ lượt đã xong mới tính là hàng ra — khớp `soConDaXong()` bản web.
+  /// Chỉ lượt đã xong mới tính là hàng ra, và **trừ luôn số lỗi** — khớp
+  /// `soHangTot()` bản web, để thanh tiến độ không nói dối.
   int get doneQuantity => runs
       .where((r) => r.status == BulkStatus.completed)
-      .fold(0, (sum, r) => sum + r.quantity);
+      .fold(0, (sum, r) => sum + r.goodQuantity);
+
+  /// Tổng số con lỗi đã ghi trong đơn.
+  int get defectQuantity => runs.fold(0, (sum, r) => sum + r.defectQuantity);
+
+  /// Số miếng lỗi chưa được in bù.
+  ///
+  /// Lượt bù đã tạo (dù chưa in xong) coi như đã nhận phần lỗi đó, nếu không bấm
+  /// "In miếng lỗi" hai lần sẽ đẻ thêm lượt cho cùng số lỗi cũ.
+  int get pendingRework {
+    final daBu = runs.where((r) => r.isRework).fold(0, (sum, r) => sum + r.quantity);
+    final con = defectQuantity - daBu;
+    return con < 0 ? 0 : con;
+  }
 
   int get doneRuns => runs.where((r) => r.status == BulkStatus.completed).length;
 

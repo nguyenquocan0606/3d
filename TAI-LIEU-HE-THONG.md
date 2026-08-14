@@ -296,7 +296,7 @@ PrintJob (log lệnh in tem)
 | `status` | String = `pending` | `pending` \| `printing` \| `completed` — **tự suy từ trạng thái các lượt** (`trangThaiDon()`) |
 
 #### `BulkRun` — 1 lượt in (1 mâm PEI trên 1 máy)
-Số lượt = `ceil(totalQuantity / perSheetQty)`, chia **vòng tròn** cho các máy chọn lúc tạo đơn nên máy nào cũng có PEI 1, PEI 2… (logic ở `src/utils/bulk-production.ts`, có test).
+Chia **vòng tròn** cho các máy chọn lúc tạo đơn nên máy nào cũng có PEI 1, PEI 2… Mỗi máy có thể khai **số con/mâm riêng** (máy khổ bàn khác nhau), máy không khai thì dùng `perSheetQty` chung — logic `chiaLuotInTheoMay()` ở `src/utils/bulk-production.ts`, có test.
 
 | Trường | Kiểu | Ghi chú |
 |--------|------|---------|
@@ -307,6 +307,8 @@ Số lượt = `ceil(totalQuantity / perSheetQty)`, chia **vòng tròn** cho cá
 | `seq` | Int | thứ tự lượt trong cả đơn (1..N) |
 | `peiIndex` | Int | lượt PEI thứ mấy **trên chính máy đó** |
 | `quantity` | Int | số con của lượt (lượt cuối có thể lẻ) |
+| `defectQuantity` | Int = 0 | số con **lỗi**, nhập lúc quẹt "in xong". Hàng tốt = `quantity - defectQuantity` |
+| `isRework` | Boolean = false | lượt **in bù** cho hàng lỗi, sinh bằng nút "In miếng lỗi" |
 | `status` | String = `pending` | `pending` → `printing` → `completed` |
 | `startedAt` / `finishedAt` | DateTime? | mốc quẹt check-in / check-out, **không nhập tay** |
 
@@ -681,11 +683,12 @@ Chặn nếu bất kỳ tem nào `status !== 'pending'`. Cascade Order → Order
 | Endpoint | Ghi chú |
 |----------|---------|
 | `GET /api/bulk-orders` | include `runs` (kèm `printer`, sort `seq ASC`); sort `createdAt DESC` |
-| `POST /api/bulk-orders` | `{productName, totalQuantity, perSheetQty, printerIds[], orderCode?, customerName?, note?}` → **tự chia lượt + cấp mã vạch cho từng lượt**. `printerIds` giữ nguyên thứ tự người dùng chọn (máy đầu nhận lượt 1) |
+| `POST /api/bulk-orders` | `{productName, totalQuantity, perSheetQty, printerIds[], printerLimits?, orderCode?, customerName?, note?}` → **tự chia lượt + cấp mã vạch cho từng lượt**. `printerIds` giữ nguyên thứ tự người dùng chọn (máy đầu nhận lượt 1); `printerLimits` = `{printerId: số con/mâm riêng}` |
 | `GET /api/bulk-orders/[id]` | |
-| `PATCH /api/bulk-orders/[id]` | `{orderCode?, customerName?, productName?, note?, status?}` — **không chia lại lượt**, muốn đổi số lượng thì xóa đơn tạo lại |
+| `PATCH /api/bulk-orders/[id]` | `{orderCode?, customerName?, productName?, note?, status?}` sửa mô tả. Gửi kèm `{totalQuantity, perSheetQty, printerIds[], printerLimits?}` thì **chia lại lượt từ đầu**: xóa hết lượt cũ, cấp mã vạch mới, đơn về `pending` — tem cũ thành rác nên client phải hỏi lại |
+| `POST /api/bulk-orders/[id]/rework` | "In miếng lỗi": gom số lỗi **chưa bù** (`tổng lỗi − số con của các lượt isRework`) rồi sinh lượt bù trên đúng các máy đang chạy đơn |
 | `DELETE /api/bulk-orders/[id]` | Xóa luôn các `BulkRun` (Cascade) |
-| `POST /api/bulk-runs/scan` | `{code}` → quẹt lần 1 set `printing` + `startedAt`, lần 2 set `completed` + `finishedAt`; lần 3 trả lỗi 400 kèm giờ đã xong. Cập nhật lại `BulkOrder.status` sau mỗi lần quẹt |
+| `POST /api/bulk-runs/scan` | `{code, printerId?, defectQuantity?}` → quẹt lần 1 set `printing` + `startedAt` (+ gán lại máy theo `printerId` quẹt kèm), lần 2 set `completed` + `finishedAt` + ghi `defectQuantity`; lần 3 trả lỗi 400 kèm giờ đã xong. Cập nhật lại `BulkOrder.status` sau mỗi lần quẹt |
 | `PATCH /api/bulk-runs/[id]` | Sửa tay `{status?, printerId?, quantity?, startedAt?, finishedAt?}`. `status: 'pending'` **xóa cả 2 mốc thời gian** (dùng khi quẹt nhầm) |
 
 ---
@@ -933,8 +936,10 @@ Nhập/quét mã đơn → hiện đơn + **thanh tiến độ `checkedItems / t
 
 **e) Sản Xuất SLL** (`bulk-production-tab.tsx`) — **chế độ 2, cho đơn lớn**
 Không dán tem từng con nữa, đơn vị là 1 lượt mâm PEI.
-- Form tạo đơn: khách, mã đơn, tên SP, **tổng số con**, **số con/mâm PEI**, ghi chú, **chọn máy in** (bấm theo thứ tự, số badge = thứ tự nhận lượt). Preview trực tiếp "sẽ chia N lượt trên M máy — máy X: n lượt…" tính bằng `chiaLuotIn()` ngay trên client.
-- Ô quẹt mã ở đầu tab (autofocus, nghe cả event `productionNumericScanned` từ máy quét HID): **quẹt lần 1 = bắt đầu in, lần 2 = in xong**.
+- Form tạo đơn: khách, mã đơn, tên SP, **tổng số con**, **số con/mâm PEI** (khai riêng được cho từng máy), ghi chú, **chọn máy in** (bấm theo thứ tự, số badge = thứ tự nhận lượt). Preview trực tiếp "sẽ chia N lượt — máy X: n lượt × q con…" tính bằng `chiaLuotInTheoMay()` ngay trên client.
+- Form sửa đơn: sửa mô tả bằng nút Lưu; khối riêng **"chia lại lượt in"** để đổi số lượng/máy (có hỏi xác nhận vì xóa sạch lượt + tem cũ).
+- Ô quẹt mã ở đầu tab (autofocus, nghe `productionNumericScanned` cho mã số và `productionCodeScanned` cho tem máy in): **bắt đầu in = quẹt mã lượt rồi quẹt tem MÁY IN** (máy quẹt được là máy gán cho lượt), **in xong = quẹt mã lượt rồi trả lời hộp "có miếng lỗi không"**.
+- Miếng lỗi: số lỗi trừ thẳng vào hàng tốt của đơn; nút **"In miếng lỗi"** gom tổng lỗi chưa bù → sinh lượt bù (`isRework`) + in tem cho chính các lượt đó.
 - Lưới card đơn: progress bar `số con đã xong / tổng`, badge trạng thái, in toàn bộ tem, xóa đơn. Bấm card để xem chi tiết.
 - Bảng chi tiết **nhóm theo máy** (thu gọn được): Mã lượt | PEI | Số con | Trạng thái | Bắt đầu in | In xong | Thời lượng | thao tác (in tem lượt, ghi nhận bắt đầu/xong thủ công, đặt lại về chờ in khi quẹt nhầm).
 - In tem qua `POST /api/print-jobs/batch` — `line1` = mã lượt, `line2` = tên SP, `line3` = `<máy> PEI <n> - <số> con`.
@@ -1382,6 +1387,7 @@ POST   /api/bulk-orders
 GET    /api/bulk-orders/[id]
 PATCH  /api/bulk-orders/[id]
 DELETE /api/bulk-orders/[id]
+POST   /api/bulk-orders/[id]/rework
 POST   /api/bulk-runs/scan
 PATCH  /api/bulk-runs/[id]
 

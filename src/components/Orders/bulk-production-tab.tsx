@@ -16,7 +16,13 @@ import {
   Pencil,
   X,
 } from 'lucide-react';
-import { chiaLuotInTheoMay, dinhDangThoiLuong } from '@/utils/bulk-production';
+import {
+  chiaLuotInTheoMay,
+  dinhDangThoiLuong,
+  canBuBaoNhieu,
+  tongSoLoi,
+  soHangTot,
+} from '@/utils/bulk-production';
 
 type BulkRun = {
   id: string;
@@ -25,6 +31,10 @@ type BulkRun = {
   seq: number;
   peiIndex: number;
   quantity: number;
+  /** Số con lỗi ghi lúc quẹt "in xong". */
+  defectQuantity: number;
+  /** Lượt in bù cho hàng lỗi, không nằm trong kế hoạch chia ban đầu. */
+  isRework: boolean;
   status: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -60,8 +70,8 @@ const dinhDangMoc = (iso: string | null) => {
   });
 };
 
-const soConDaXong = (runs: BulkRun[]) =>
-  runs.filter((r) => r.status === 'completed').reduce((s, r) => s + r.quantity, 0);
+/** Hàng tốt đã ra — lỗi bị trừ ngay, để thanh tiến độ không nói dối. */
+const soConDaXong = (runs: BulkRun[]) => soHangTot(runs);
 
 /** Sức chứa mâm của từng máy theo đúng thứ tự chọn: máy khai riêng thì lấy số riêng. */
 const sucChuaTheoMay = (
@@ -188,6 +198,9 @@ export default function BulkProductionTab() {
 
   // Lượt đang chờ quẹt tem máy in để bắt đầu (bước 2 của check-in).
   const [choMay, setChoMay] = useState<{ run: BulkRun; productName: string } | null>(null);
+  // Lượt vừa quẹt xong, đang hỏi mâm này có miếng lỗi nào không.
+  const [hoiLoi, setHoiLoi] = useState<{ run: BulkRun; productName: string } | null>(null);
+  const [soLoi, setSoLoi] = useState('');
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -225,18 +238,24 @@ export default function BulkProductionTab() {
   // khác máy được chia lúc tạo đơn (máy kẹt nhựa, dồn mâm sang máy đang rảnh), nên
   // máy nào được quẹt thì lượt gán về đúng máy đó. Chốt in xong chỉ cần mã lượt.
   const guiQuetMa = useCallback(
-    async (runId: string, printerId?: string) => {
+    async (runId: string, printerId?: string, defectQuantity?: number) => {
       try {
         const res = await fetch('/api/bulk-runs/scan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: runId, ...(printerId ? { printerId } : {}) }),
+          body: JSON.stringify({
+            code: runId,
+            ...(printerId ? { printerId } : {}),
+            ...(defectQuantity ? { defectQuantity } : {}),
+          }),
         });
         const data = await res.json();
         if (data.status === 'success') {
           notify(data.message, 'success');
           setSelectedOrderId(data.data.run.orderId);
           setChoMay(null);
+          setHoiLoi(null);
+          setSoLoi('');
           fetchData();
         } else {
           notify(data.message || 'Lỗi khi quẹt mã');
@@ -285,7 +304,14 @@ export default function BulkProductionTab() {
         return;
       }
 
-      // Lượt đang in (chốt xong) hoặc mã lạ — để backend trả lời cho đúng câu.
+      // Lượt đang in: hỏi số miếng lỗi trước khi chốt xong.
+      if (found && found.run.status === 'printing') {
+        setHoiLoi(found);
+        setSoLoi('');
+        return;
+      }
+
+      // Mã lạ hoặc lượt đã xong — để backend trả lời cho đúng câu.
       await guiQuetMa(ma);
     },
     [choMay, guiQuetMa, printers, timLuot]
@@ -494,6 +520,26 @@ export default function BulkProductionTab() {
     );
   };
 
+  // ── In miếng lỗi: sinh lượt bù cho toàn bộ số lỗi chưa bù, rồi in tem luôn ──
+  const handleInMiengLoi = async (order: BulkOrder) => {
+    const canBu = canBuBaoNhieu(order.runs);
+    if (canBu <= 0) return notify('Đơn này chưa có miếng lỗi nào cần in bù');
+
+    const idCu = new Set(order.runs.map((r) => r.id));
+    try {
+      const res = await fetch(`/api/bulk-orders/${order.id}/rework`, { method: 'POST' });
+      const data = await res.json();
+      if (data.status !== 'success') return notify(data.message || 'Lỗi tạo lượt in bù');
+
+      notify(data.message, 'success');
+      const luotMoi: BulkRun[] = (data.data.runs as BulkRun[]).filter((r) => !idCu.has(r.id));
+      await inTem(luotMoi, data.data as BulkOrder);
+      fetchData();
+    } catch {
+      notify('Lỗi kết nối khi tạo lượt in bù');
+    }
+  };
+
   const handleDeleteOrder = (order: BulkOrder) => {
     window.dispatchEvent(
       new CustomEvent('appConfirm', {
@@ -627,6 +673,60 @@ export default function BulkProductionTab() {
           </button>
         </form>
       </div>
+
+      {/* Hỏi miếng lỗi khi chốt "in xong" */}
+      {hoiLoi && (
+        <div className="bg-white dark:bg-[#111827] border border-emerald-500/40 rounded-2xl p-6 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+              Mâm {hoiLoi.run.printerName} · PEI {hoiLoi.run.peiIndex} ({hoiLoi.run.quantity} con) —
+              có miếng nào lỗi không?
+            </h3>
+            <button onClick={() => setHoiLoi(null)} className="text-slate-500 hover:text-rose-500">
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => guiQuetMa(hoiLoi.run.id)}
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-xl"
+            >
+              Không lỗi — xong {hoiLoi.run.quantity} con
+            </button>
+
+            <div className="flex items-center gap-2 ml-auto">
+              <input
+                autoFocus
+                type="number"
+                min={1}
+                max={hoiLoi.run.quantity}
+                value={soLoi}
+                onChange={(e) => setSoLoi(e.target.value)}
+                placeholder="Số con lỗi"
+                className="w-32 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
+              />
+              <button
+                onClick={() => {
+                  const n = Math.floor(Number(soLoi));
+                  if (!n || n <= 0) return notify('Nhập số con lỗi lớn hơn 0');
+                  if (n > hoiLoi.run.quantity)
+                    return notify(`Lượt này chỉ có ${hoiLoi.run.quantity} con`);
+                  guiQuetMa(hoiLoi.run.id, undefined, n);
+                }}
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold rounded-xl"
+              >
+                Ghi nhận lỗi
+              </button>
+            </div>
+          </div>
+
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Số lỗi bị trừ khỏi hàng tốt của đơn. In bù bằng nút &quot;In miếng lỗi&quot; ở phần chi
+            tiết bên dưới.
+          </div>
+        </div>
+      )}
 
       {/* Form tạo đơn */}
       {showForm && (
@@ -955,6 +1055,9 @@ export default function BulkProductionTab() {
 
                 <div className="text-xs text-slate-500 mb-2">
                   {order.runs.length} lượt · {order.perSheetQty} con/mâm
+                  {tongSoLoi(order.runs) > 0 && (
+                    <span className="text-rose-500"> · lỗi {tongSoLoi(order.runs)}</span>
+                  )}
                 </div>
 
                 <div className="h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden mb-1">
@@ -1008,10 +1111,30 @@ export default function BulkProductionTab() {
       {/* Bảng chi tiết theo máy / lượt PEI */}
       {selectedOrder && (
         <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-            Chi tiết lượt in — {selectedOrder.productName}
-            {selectedOrder.note && <span className="ml-2 text-xs font-normal text-slate-500">({selectedOrder.note})</span>}
-          </h3>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+              Chi tiết lượt in — {selectedOrder.productName}
+              {selectedOrder.note && <span className="ml-2 text-xs font-normal text-slate-500">({selectedOrder.note})</span>}
+            </h3>
+
+            {tongSoLoi(selectedOrder.runs) > 0 && (
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-sm text-rose-500">
+                  Lỗi: {tongSoLoi(selectedOrder.runs)} con
+                  {canBuBaoNhieu(selectedOrder.runs) > 0
+                    ? ` · cần in bù ${canBuBaoNhieu(selectedOrder.runs)}`
+                    : ' · đã có lượt bù đủ'}
+                </span>
+                <button
+                  onClick={() => handleInMiengLoi(selectedOrder)}
+                  disabled={canBuBaoNhieu(selectedOrder.runs) === 0}
+                  className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:hover:bg-rose-600 text-white text-sm font-semibold rounded-xl"
+                >
+                  <RotateCcw size={15} /> In miếng lỗi
+                </button>
+              </div>
+            )}
+          </div>
 
           {runsTheoMay.map(({ key, printerName, runs }) => {
             const dongLai = collapsedPrinters.includes(key);
@@ -1054,6 +1177,7 @@ export default function BulkProductionTab() {
                           <th className="px-4 py-2.5">Mã lượt</th>
                           <th className="px-4 py-2.5">PEI</th>
                           <th className="px-4 py-2.5">Số con</th>
+                          <th className="px-4 py-2.5">Lỗi</th>
                           <th className="px-4 py-2.5">Trạng thái</th>
                           <th className="px-4 py-2.5">Bắt đầu in</th>
                           <th className="px-4 py-2.5">In xong</th>
@@ -1067,13 +1191,27 @@ export default function BulkProductionTab() {
                             key={run.id}
                             className="text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/30"
                           >
-                            <td className="px-4 py-2.5 font-mono font-bold text-slate-900 dark:text-white">{run.id}</td>
+                            <td className="px-4 py-2.5 font-mono font-bold text-slate-900 dark:text-white">
+                              {run.id}
+                              {run.isRework && (
+                                <span className="ml-2 px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-500 text-[10px] font-sans border border-rose-500/20">
+                                  BÙ
+                                </span>
+                              )}
+                            </td>
                             <td className="px-4 py-2.5">
                               <span className="px-2 py-0.5 bg-slate-200 dark:bg-slate-800 rounded text-xs font-semibold">
                                 PEI {run.peiIndex}
                               </span>
                             </td>
                             <td className="px-4 py-2.5">{run.quantity}</td>
+                            <td className="px-4 py-2.5">
+                              {run.defectQuantity > 0 ? (
+                                <span className="text-rose-500 font-semibold">{run.defectQuantity}</span>
+                              ) : (
+                                <span className="text-slate-500">—</span>
+                              )}
+                            </td>
                             <td className="px-4 py-2.5">
                               {run.status === 'completed' && (
                                 <span className="px-2 py-1 bg-emerald-500/10 text-emerald-500 rounded text-xs border border-emerald-500/20">
@@ -1107,11 +1245,14 @@ export default function BulkProductionTab() {
                                 </button>
                                 {run.status !== 'completed' && (
                                   <button
-                                    onClick={() =>
-                                      run.status === 'pending'
-                                        ? setChoMay({ run, productName: selectedOrder.productName })
-                                        : xuLyQuetMa(run.id)
-                                    }
+                                    onClick={() => {
+                                      const ctx = { run, productName: selectedOrder.productName };
+                                      if (run.status === 'pending') setChoMay(ctx);
+                                      else {
+                                        setSoLoi('');
+                                        setHoiLoi(ctx);
+                                      }
+                                    }}
                                     title={
                                       run.status === 'pending'
                                         ? 'Bắt đầu in — quẹt tiếp tem máy in'

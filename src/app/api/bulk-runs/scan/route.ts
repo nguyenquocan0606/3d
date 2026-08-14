@@ -4,6 +4,10 @@ import { dinhDangThoiLuong, trangThaiDon } from '@/utils/bulk-production';
 
 /**
  * Quẹt mã 1 lượt in: lần quẹt đầu = check-in (bắt đầu in), lần quẹt sau = check-out (in xong).
+ *
+ * `defectQuantity` (tùy chọn, chỉ dùng lúc check-out) là số con lỗi của mâm vừa in.
+ * Hàng tốt = quantity - defectQuantity, và tổng lỗi cả đơn là căn cứ để bấm "In
+ * miếng lỗi" sinh lượt in bù.
  * Mốc thời gian lấy theo lúc quẹt, không nhập tay.
  *
  * `printerId` (tùy chọn) là mã máy in quẹt kèm lúc check-in: máy chạy thật có thể
@@ -12,11 +16,13 @@ import { dinhDangThoiLuong, trangThaiDon } from '@/utils/bulk-production';
  */
 export async function POST(req: Request) {
   try {
-    const { code, printerId } = await req.json();
+    const { code, printerId, defectQuantity } = await req.json();
     const ma = String(code || '').trim();
     if (!ma) return fail('Thiếu mã lượt in', 400);
 
     const maMay = String(printerId || '').trim();
+    // Số con lỗi chỉ ghi ở lần quẹt chốt "in xong"; không gửi thì coi như 0.
+    const soLoi = Math.max(0, Math.floor(Number(defectQuantity) || 0));
 
     const run = await prisma.bulkRun.findUnique({
       where: { id: ma },
@@ -51,7 +57,7 @@ export async function POST(req: Request) {
             finishedAt: null,
             ...(may && { printerId: may.id, printerName: may.name }),
           }
-        : { status: 'completed', finishedAt: bayGio },
+        : { status: 'completed', finishedAt: bayGio, defectQuantity: soLoi },
       include: { order: true, printer: true },
     });
 
@@ -67,7 +73,8 @@ export async function POST(req: Request) {
 
     const message = laCheckIn
       ? `Bắt đầu in: ${runMoi.printerName} · PEI ${runMoi.peiIndex} (${runMoi.quantity} con)`
-      : `In xong: ${runMoi.printerName} · PEI ${runMoi.peiIndex} — hết ${dinhDangThoiLuong(runMoi.startedAt, runMoi.finishedAt)}`;
+      : `In xong: ${runMoi.printerName} · PEI ${runMoi.peiIndex} — hết ${dinhDangThoiLuong(runMoi.startedAt, runMoi.finishedAt)}` +
+        (soLoi > 0 ? ` · ${soLoi} con lỗi, được ${runMoi.quantity - soLoi} con tốt` : '');
 
     return ok({ run: runMoi, action: laCheckIn ? 'check-in' : 'check-out', orderStatus: statusDon }, message);
   } catch (error: unknown) {

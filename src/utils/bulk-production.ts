@@ -94,3 +94,54 @@ export function dinhDangThoiLuong(startedAt?: Date | string | null, finishedAt?:
   if (gio === 0) return `${phut}p`;
   return `${gio}g ${phut}p`;
 }
+
+/** Phần chung của 1 lượt in mà các hàm tổng hợp dưới đây cần. */
+export interface LuotDeTongHop {
+  printerId: string | null;
+  quantity: number;
+  defectQuantity: number;
+  isRework: boolean;
+  status: string;
+  peiIndex: number;
+}
+
+/** Tổng số con lỗi đã ghi trong đơn. */
+export const tongSoLoi = (runs: LuotDeTongHop[]) =>
+  runs.reduce((s, r) => s + (r.defectQuantity || 0), 0);
+
+/**
+ * Còn bao nhiêu miếng lỗi chưa được in bù.
+ *
+ * Lượt bù đã tạo (kể cả chưa in xong) coi như đã nhận phần lỗi đó, nếu không mỗi
+ * lần bấm "In miếng lỗi" lại đẻ thêm một loạt lượt cho cùng số lỗi cũ.
+ */
+export const canBuBaoNhieu = (runs: LuotDeTongHop[]) => {
+  const daBu = runs.filter((r) => r.isRework).reduce((s, r) => s + r.quantity, 0);
+  return Math.max(0, tongSoLoi(runs) - daBu);
+};
+
+/** Hàng tốt đã ra: chỉ lượt in xong, trừ đi số lỗi của chính lượt đó. */
+export const soHangTot = (runs: LuotDeTongHop[]) =>
+  runs
+    .filter((r) => r.status === 'completed')
+    .reduce((s, r) => s + Math.max(0, r.quantity - (r.defectQuantity || 0)), 0);
+
+/**
+ * Suy lại danh sách máy và sức chứa mâm của từng máy từ chính các lượt đã chia.
+ *
+ * DB không lưu riêng hai thứ này: thứ tự máy lấy theo máy xuất hiện lần đầu, còn
+ * sức chứa lấy lượt **đầy nhất** của máy (lượt cuối có thể lẻ nên không lấy bừa).
+ */
+export function sucChuaTheoMayTuLuot(runs: LuotDeTongHop[]): {
+  printerIds: string[];
+  sucChua: Record<string, number>;
+} {
+  const printerIds: string[] = [];
+  const sucChua: Record<string, number> = {};
+  for (const run of runs) {
+    if (!run.printerId) continue;
+    if (!printerIds.includes(run.printerId)) printerIds.push(run.printerId);
+    sucChua[run.printerId] = Math.max(sucChua[run.printerId] ?? 0, run.quantity);
+  }
+  return { printerIds, sucChua };
+}

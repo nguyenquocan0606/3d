@@ -129,8 +129,17 @@ class BulkOrderCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          Text(
-            '${order.runs.length} lượt · ${order.perSheetQty} con/mâm',
+          Text.rich(
+            TextSpan(
+              text: '${order.runs.length} lượt · ${order.perSheetQty} con/mâm',
+              children: [
+                if (order.defectQuantity > 0)
+                  TextSpan(
+                    text: ' · lỗi ${order.defectQuantity}',
+                    style: const TextStyle(color: AppColors.danger),
+                  ),
+              ],
+            ),
             style: const TextStyle(fontSize: 12, color: AppColors.muted),
           ),
           const SizedBox(height: 8),

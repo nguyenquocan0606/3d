@@ -48,10 +48,10 @@ class BulkRepository {
         },
       );
 
-  /// Sửa phần thông tin của đơn.
+  /// Sửa phần mô tả của đơn — không đụng tới lượt đã chia.
   ///
-  /// Backend **không** cho đổi tổng số con / số con mỗi mâm / danh sách máy: lượt
-  /// in đã chia xong và tem mã vạch đã in ra, muốn chia lại thì xóa đơn tạo mới.
+  /// Muốn đổi số lượng / máy chạy thì dùng [resplitOrder], vì việc đó chia lại
+  /// toàn bộ lượt.
   Future<void> updateOrder(
     String id, {
     required String productName,
@@ -95,6 +95,13 @@ class BulkRepository {
         },
       );
 
+  /// "In miếng lỗi": gom số lỗi chưa bù của đơn rồi sinh lượt in bù, trả về đơn
+  /// đã cập nhật để phía gọi biết lượt nào vừa sinh mà in tem.
+  Future<BulkOrder> createRework(String id) => _api.post(
+        '/api/bulk-orders/${Uri.encodeComponent(id)}/rework',
+        (data) => BulkOrder.fromJson(asMap(data)),
+      );
+
   /// Xóa đơn kèm toàn bộ lượt (Cascade) — mốc check-in/out đã ghi sẽ mất.
   Future<void> deleteOrder(String id) =>
       _api.delete<void>('/api/bulk-orders/${Uri.encodeComponent(id)}', (_) {});
@@ -105,7 +112,13 @@ class BulkRepository {
   /// sẵn câu tiếng Việt nên cứ hiển thị thẳng.
   /// [printerId] chỉ dùng cho lần quẹt check-in: máy quẹt kèm là máy chạy thật,
   /// backend gán lại lượt về máy đó (có thể khác máy được chia lúc tạo đơn).
-  Future<BulkScanResult> scanRun(String code, {String? printerId}) => _api.post(
+  /// [defectQuantity] chỉ dùng cho lần chốt "in xong".
+  Future<BulkScanResult> scanRun(
+    String code, {
+    String? printerId,
+    int defectQuantity = 0,
+  }) =>
+      _api.post(
         '/api/bulk-runs/scan',
         (data) {
           final map = asMap(data);
@@ -117,6 +130,7 @@ class BulkRepository {
         body: {
           'code': code,
           if (printerId != null) 'printerId': printerId,
+          if (defectQuantity > 0) 'defectQuantity': defectQuantity,
         },
       );
 

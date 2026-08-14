@@ -469,7 +469,8 @@ ScanTargetInfo _bulkRunInfo(
     kindLabel: 'Lượt in SLL · ${don.productName}',
     title: '${luot.printerName} · PEI ${luot.peiIndex}',
     subtitle: '${luot.quantity} con · ${luot.status.label}'
-        '${batDau ? '' : ' · bắt đầu ${_shortTime(luot.startedAt)}'}',
+        '${batDau ? '' : ' · bắt đầu ${_shortTime(luot.startedAt)}'}'
+        '${luot.defectQuantity > 0 ? ' · lỗi ${luot.defectQuantity}' : ''}',
     icon: Icons.play_circle_rounded,
     color: AppColors.info,
     note: xong ? 'Lượt này đã in xong — muốn quẹt lại thì đặt lại ở màn đơn.' : null,
@@ -480,11 +481,11 @@ ScanTargetInfo _bulkRunInfo(
           label: batDau ? 'Bắt đầu in — quét tiếp máy' : 'Ghi nhận in xong',
           detail: batDau
               ? 'Quét tem máy in đang chạy lượt ${luot.quantity} con này'
-              : 'Chốt giờ kết thúc và tính thời lượng',
+              : 'Hỏi số miếng lỗi rồi chốt giờ kết thúc',
           color: batDau ? AppColors.warning : AppColors.success,
           run: (context) => batDau
               ? startBulkRunByScanningPrinter(context, ref, luot)
-              : finishBulkRun(ref, luot.id),
+              : finishBulkRunWithDefects(context, ref, luot),
         ),
       open('Mở đơn SLL', Icons.open_in_new_rounded, Routes.bulkOrderDetail(don.id),
           detail: 'Xem toàn bộ lượt của đơn'),
