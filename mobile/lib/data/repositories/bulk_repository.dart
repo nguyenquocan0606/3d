@@ -19,11 +19,15 @@ class BulkRepository {
       );
 
   /// Tạo đơn + chia lượt. Thứ tự [printerIds] quyết định máy nào nhận lượt PEI 1.
+  ///
+  /// [printerLimits] khai số con/mâm riêng cho từng máy (`printerId` → số con);
+  /// máy không có trong map thì dùng [perSheetQty] chung.
   Future<BulkOrder> createOrder({
     required String productName,
     required int totalQuantity,
     required int perSheetQty,
     required List<String> printerIds,
+    Map<String, int> printerLimits = const {},
     String? orderCode,
     String? customerName,
     String? note,
@@ -36,6 +40,7 @@ class BulkRepository {
           'totalQuantity': totalQuantity,
           'perSheetQty': perSheetQty,
           'printerIds': printerIds,
+          if (printerLimits.isNotEmpty) 'printerLimits': printerLimits,
           if (orderCode != null && orderCode.isNotEmpty) 'orderCode': orderCode,
           if (customerName != null && customerName.isNotEmpty)
             'customerName': customerName,
@@ -64,6 +69,29 @@ class BulkRepository {
           'customerName': customerName?.isEmpty ?? true ? 'Khách lẻ' : customerName,
           'note': note?.isEmpty ?? true ? null : note,
           if (status != null) 'status': status.value,
+        },
+      );
+
+  /// Chia lại lượt in từ đầu.
+  ///
+  /// **Phá hủy dữ liệu**: mọi lượt cũ bị xóa và cấp mã vạch mới, nên tem đã in
+  /// thành rác và mốc check-in/check-out đã ghi mất sạch. Luôn hỏi lại người dùng
+  /// trước khi gọi.
+  Future<void> resplitOrder(
+    String id, {
+    required int totalQuantity,
+    required int perSheetQty,
+    required List<String> printerIds,
+    Map<String, int> printerLimits = const {},
+  }) =>
+      _api.patch<void>(
+        '/api/bulk-orders/${Uri.encodeComponent(id)}',
+        (_) {},
+        body: {
+          'totalQuantity': totalQuantity,
+          'perSheetQty': perSheetQty,
+          'printerIds': printerIds,
+          if (printerLimits.isNotEmpty) 'printerLimits': printerLimits,
         },
       );
 

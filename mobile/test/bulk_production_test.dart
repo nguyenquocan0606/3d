@@ -30,6 +30,28 @@ void main() {
     });
   });
 
+  group('chiaLuotInTheoMay', () {
+    test('mỗi máy xếp theo sức chứa mâm riêng của nó', () {
+      // Máy 1 khổ to (100 con/mâm), máy 2 khổ nhỏ (40 con/mâm).
+      final luots = chiaLuotInTheoMay(280, [100, 40]);
+      expect(luots.map((l) => l.quantity), [100, 40, 100, 40]);
+      expect(luots.map((l) => l.printerIndex), [0, 1, 0, 1]);
+      expect(
+        luots.where((l) => l.printerIndex == 1).map((l) => l.peiIndex),
+        [1, 2],
+      );
+    });
+
+    test('lượt cuối vẫn nhận phần dư', () {
+      expect(chiaLuotInTheoMay(150, [100, 40]).map((l) => l.quantity), [100, 40, 10]);
+    });
+
+    test('sức chứa <= 0 trả rỗng thay vì lặp vô hạn', () {
+      expect(chiaLuotInTheoMay(100, [50, 0]), isEmpty);
+      expect(chiaLuotInTheoMay(100, const []), isEmpty);
+    });
+  });
+
   group('BulkOrder', () {
     BulkRun run(String id, int quantity, BulkStatus status) => BulkRun(
           id: id,

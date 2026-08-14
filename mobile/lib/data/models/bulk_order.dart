@@ -172,24 +172,43 @@ class PlannedRun {
   final int quantity;
 }
 
-/// Port `chiaLuotIn()` của `src/utils/bulk-production.ts`.
+/// Port `chiaLuotInTheoMay()` của `src/utils/bulk-production.ts`.
 ///
-/// Chia vòng tròn cho các máy được chọn để không máy nào phải chờ máy khác xong;
-/// lượt cuối nhận phần dư. Dùng ở app **chỉ để xem trước** — số lượt thật vẫn do
-/// backend chia lúc tạo đơn.
-List<PlannedRun> chiaLuotIn(int tongSoCon, int soConMoiMam, int soMay) {
-  if (tongSoCon <= 0 || soConMoiMam <= 0 || soMay <= 0) return const [];
+/// `sucChuaMoiMay[i]` = số con xếp vừa 1 mâm PEI **của máy thứ i**: máy khổ bàn
+/// khác nhau xếp được số con khác nhau, máy nào không khai riêng thì phía gọi
+/// truyền sẵn số chung vào đây. Dùng ở app **chỉ để xem trước** — số lượt thật
+/// vẫn do backend chia.
+List<PlannedRun> chiaLuotInTheoMay(int tongSoCon, List<int> sucChuaMoiMay) {
+  if (tongSoCon <= 0 || sucChuaMoiMay.isEmpty) return const [];
+  // Máy khai sức chứa <= 0 sẽ làm vòng lặp chạy mãi mà không xếp được con nào.
+  if (sucChuaMoiMay.any((n) => n <= 0)) return const [];
 
-  final soLuot = (tongSoCon / soConMoiMam).ceil();
-  return [
-    for (var i = 0; i < soLuot; i++)
-      PlannedRun(
-        seq: i + 1,
-        printerIndex: i % soMay,
-        peiIndex: i ~/ soMay + 1,
-        quantity: (tongSoCon - i * soConMoiMam) < soConMoiMam
-            ? tongSoCon - i * soConMoiMam
-            : soConMoiMam,
-      ),
-  ];
+  final luots = <PlannedRun>[];
+  final soMamDaXep = List<int>.filled(sucChuaMoiMay.length, 0);
+  var daXep = 0;
+  var luotThu = 0;
+
+  while (daXep < tongSoCon) {
+    final may = luotThu % sucChuaMoiMay.length;
+    final quantity = sucChuaMoiMay[may] < (tongSoCon - daXep)
+        ? sucChuaMoiMay[may]
+        : tongSoCon - daXep;
+    soMamDaXep[may] += 1;
+    luots.add(PlannedRun(
+      seq: luots.length + 1,
+      printerIndex: may,
+      peiIndex: soMamDaXep[may],
+      quantity: quantity,
+    ));
+    daXep += quantity;
+    luotThu += 1;
+  }
+
+  return luots;
+}
+
+/// Chia lượt khi mọi máy dùng chung một số con/mâm.
+List<PlannedRun> chiaLuotIn(int tongSoCon, int soConMoiMam, int soMay) {
+  if (soMay <= 0 || soConMoiMam <= 0) return const [];
+  return chiaLuotInTheoMay(tongSoCon, List<int>.filled(soMay, soConMoiMam));
 }

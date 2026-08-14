@@ -7,9 +7,9 @@ import '../../core/routes.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../../data/models/bulk_order.dart';
-import '../../data/models/printer.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/bulk_repository.dart';
+import 'printer_picker.dart';
 
 /// Tạo đơn SLL + chia lượt.
 ///
@@ -34,6 +34,9 @@ class _CreateBulkOrderScreenState extends ConsumerState<CreateBulkOrderScreen> {
 
   /// Thứ tự bấm chọn = thứ tự nhận lượt, nên phải giữ list chứ không dùng Set.
   final List<String> _printerIds = [];
+
+  /// printerId → số con mỗi mâm riêng của máy đó (bỏ trống = dùng số chung).
+  final Map<String, String> _limits = {};
 
   bool _saving = false;
 
@@ -77,6 +80,11 @@ class _CreateBulkOrderScreenState extends ConsumerState<CreateBulkOrderScreen> {
             totalQuantity: _total,
             perSheetQty: _perSheet,
             printerIds: _printerIds,
+            printerLimits: {
+              for (final id in _printerIds)
+                if ((int.tryParse(_limits[id] ?? '') ?? 0) > 0)
+                  id: int.parse(_limits[id]!),
+            },
             orderCode: _orderCode.text.trim(),
             customerName: _customerName.text.trim(),
             note: _note.text.trim(),
@@ -95,7 +103,8 @@ class _CreateBulkOrderScreenState extends ConsumerState<CreateBulkOrderScreen> {
   @override
   Widget build(BuildContext context) {
     final printers = ref.watch(printersProvider).valueOrNull ?? const [];
-    final planned = chiaLuotIn(_total, _perSheet, _printerIds.length);
+    final capacities = sucChuaTheoMay(_printerIds, _limits, _perSheet);
+    final planned = chiaLuotInTheoMay(_total, capacities);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Tạo đơn SLL')),
@@ -150,61 +159,35 @@ class _CreateBulkOrderScreenState extends ConsumerState<CreateBulkOrderScreen> {
           ),
           const SizedBox(height: 4),
           const Text(
-            'Số trên nút là thứ tự nhận lượt — máy số 1 nhận PEI 1.',
-            style: TextStyle(fontSize: 12, color: AppColors.muted),
+            'Số trên nút là thứ tự nhận lượt — máy số 1 nhận PEI 1. Ô bên phải là số '
+            'con/mâm riêng của máy đó, bỏ trống thì dùng số chung ở trên.',
+            style: TextStyle(fontSize: 12, color: AppColors.muted, height: 1.4),
           ),
           const SizedBox(height: 10),
-          if (printers.isEmpty)
-            const Text(
-              'Chưa có máy in nào trong hệ thống.',
-              style: TextStyle(fontSize: 12.5, color: AppColors.muted),
-            )
-          else
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final printer in printers)
-                  _PrinterChip(
-                    name: printer.name,
-                    order: _printerIds.indexOf(printer.id),
-                    onTap: () => setState(() {
-                      if (_printerIds.contains(printer.id)) {
-                        _printerIds.remove(printer.id);
-                      } else {
-                        _printerIds.add(printer.id);
-                      }
-                    }),
-                  ),
-              ],
-            ),
+          PrinterPicker(
+            printers: printers,
+            selectedIds: _printerIds,
+            limits: _limits,
+            perSheetHint: _perSheetQty.text.trim(),
+            onToggle: (id) => setState(() {
+              if (_printerIds.contains(id)) {
+                _printerIds.remove(id);
+                _limits.remove(id);
+              } else {
+                _printerIds.add(id);
+              }
+            }),
+            onLimit: (id, value) => setState(() => _limits[id] = value),
+          ),
           if (planned.isNotEmpty) ...[
             const SizedBox(height: 14),
             SectionCard(
               borderColor: AppColors.indigo,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Sẽ chia thành ${planned.length} lượt in trên '
-                    '${_printerIds.length} máy',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 6),
-                  for (var i = 0; i < _printerIds.length; i++)
-                    Text(
-                      '${_printerName(printers, _printerIds[i])}: '
-                      '${planned.where((p) => p.printerIndex == i).length} lượt',
-                      style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
-                    ),
-                  if (planned.last.quantity != _perSheet) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      'Lượt cuối chỉ ${planned.last.quantity} con.',
-                      style: const TextStyle(fontSize: 12.5, color: AppColors.warning),
-                    ),
-                  ],
-                ],
+              child: SplitPreview(
+                printers: printers,
+                selectedIds: _printerIds,
+                planned: planned,
+                capacities: capacities,
               ),
             ),
           ],
@@ -228,12 +211,6 @@ class _CreateBulkOrderScreenState extends ConsumerState<CreateBulkOrderScreen> {
     );
   }
 
-  static String _printerName(List<Printer> printers, String id) {
-    for (final printer in printers) {
-      if (printer.id == id) return printer.name;
-    }
-    return id;
-  }
 }
 
 class _Field extends StatelessWidget {
@@ -264,68 +241,6 @@ class _Field extends StatelessWidget {
           labelText: label,
           hintText: hint,
           isDense: true,
-        ),
-      ),
-    );
-  }
-}
-
-class _PrinterChip extends StatelessWidget {
-  const _PrinterChip({
-    required this.name,
-    required this.order,
-    required this.onTap,
-  });
-
-  final String name;
-
-  /// Vị trí trong danh sách đã chọn, -1 nếu chưa chọn.
-  final int order;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final selected = order >= 0;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.indigo.withValues(alpha: 0.16) : AppColors.surface,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: selected ? AppColors.indigo : AppColors.border),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 20,
-              height: 20,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: selected ? AppColors.indigo : AppColors.border,
-                shape: BoxShape.circle,
-              ),
-              child: Text(
-                selected ? '${order + 1}' : '·',
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              name,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: selected ? AppColors.indigoLight : null,
-              ),
-            ),
-          ],
         ),
       ),
     );

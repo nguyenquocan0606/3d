@@ -16,7 +16,7 @@ import {
   Pencil,
   X,
 } from 'lucide-react';
-import { chiaLuotIn, dinhDangThoiLuong } from '@/utils/bulk-production';
+import { chiaLuotInTheoMay, dinhDangThoiLuong } from '@/utils/bulk-production';
 
 type BulkRun = {
   id: string;
@@ -63,6 +63,87 @@ const dinhDangMoc = (iso: string | null) => {
 const soConDaXong = (runs: BulkRun[]) =>
   runs.filter((r) => r.status === 'completed').reduce((s, r) => s + r.quantity, 0);
 
+/** Sức chứa mâm của từng máy theo đúng thứ tự chọn: máy khai riêng thì lấy số riêng. */
+const sucChuaTheoMay = (
+  ids: string[],
+  limits: Record<string, string>,
+  moiMamChung: number
+): number[] =>
+  ids.map((id) => {
+    const rieng = Number(limits[id]);
+    return Number.isFinite(rieng) && rieng > 0 ? Math.floor(rieng) : moiMamChung;
+  });
+
+/** Chọn máy + khai số con/mâm riêng cho máy đó. Dùng chung cho form tạo và form chia lại. */
+function MayPicker({
+  printers,
+  selectedIds,
+  limits,
+  moiMamChung,
+  onToggle,
+  onLimit,
+}: {
+  printers: Printer[];
+  selectedIds: string[];
+  limits: Record<string, string>;
+  moiMamChung: string;
+  onToggle: (id: string) => void;
+  onLimit: (id: string, value: string) => void;
+}) {
+  if (printers.length === 0) {
+    return <div className="text-xs text-slate-500 py-3">Chưa có máy in nào trong hệ thống</div>;
+  }
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+      {printers.map((p) => {
+        const idx = selectedIds.indexOf(p.id);
+        const chon = idx >= 0;
+        return (
+          <div
+            key={p.id}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-all ${
+              chon
+                ? 'bg-indigo-500/10 border-indigo-500'
+                : 'bg-slate-100 dark:bg-slate-900 border-slate-300 dark:border-slate-700'
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => onToggle(p.id)}
+              className={`flex items-center gap-2 flex-1 min-w-0 text-left ${
+                chon ? 'text-indigo-600 dark:text-indigo-300' : 'text-slate-600 dark:text-slate-300'
+              }`}
+            >
+              <span
+                className={`w-5 h-5 shrink-0 rounded-full text-[10px] font-bold flex items-center justify-center ${
+                  chon ? 'bg-indigo-600 text-white' : 'bg-slate-300 dark:bg-slate-700 text-slate-500'
+                }`}
+              >
+                {chon ? idx + 1 : '·'}
+              </span>
+              <span className="truncate">{p.name}</span>
+            </button>
+            {chon && (
+              <div className="flex items-center gap-1 shrink-0">
+                <input
+                  type="number"
+                  min={1}
+                  value={limits[p.id] ?? ''}
+                  onChange={(e) => onLimit(p.id, e.target.value)}
+                  placeholder={moiMamChung || '—'}
+                  title="Số con mỗi mâm PEI của riêng máy này (bỏ trống = dùng số chung)"
+                  className="w-16 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-white"
+                />
+                <span className="text-[10px] text-slate-500">con/mâm</span>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function BulkProductionTab() {
   const [orders, setOrders] = useState<BulkOrder[]>([]);
   const [printers, setPrinters] = useState<Printer[]>([]);
@@ -83,6 +164,8 @@ export default function BulkProductionTab() {
   });
   // Thứ tự trong mảng = thứ tự chia lượt, nên giữ nguyên trình tự người dùng bấm chọn
   const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
+  // printerId → số con mỗi mâm của riêng máy đó; bỏ trống là dùng số chung của đơn.
+  const [printerLimits, setPrinterLimits] = useState<Record<string, string>>({});
   const [creating, setCreating] = useState(false);
 
   // Sửa đơn: chỉ phần thông tin, KHÔNG đụng tới số lượng / máy in vì lượt đã chia
@@ -96,6 +179,12 @@ export default function BulkProductionTab() {
     status: 'pending',
   });
   const [saving, setSaving] = useState(false);
+
+  // Khối "chia lại lượt in" trong form sửa — tách riêng vì nó phá hủy dữ liệu cũ.
+  const [chiaLai, setChiaLai] = useState(false);
+  const [editSplit, setEditSplit] = useState({ totalQuantity: '', perSheetQty: '' });
+  const [editPrinterIds, setEditPrinterIds] = useState<string[]>([]);
+  const [editLimits, setEditLimits] = useState<Record<string, string>>({});
 
   // Lượt đang chờ quẹt tem máy in để bắt đầu (bước 2 của check-in).
   const [choMay, setChoMay] = useState<{ run: BulkRun; productName: string } | null>(null);
@@ -221,13 +310,32 @@ export default function BulkProductionTab() {
     const tong = Number(form.totalQuantity);
     const moiMam = Number(form.perSheetQty);
     if (!tong || !moiMam || selectedPrinterIds.length === 0) return null;
-    const luots = chiaLuotIn(tong, moiMam, selectedPrinterIds.length);
+    const luots = chiaLuotInTheoMay(tong, sucChuaTheoMay(selectedPrinterIds, printerLimits, moiMam));
     if (luots.length === 0) return null;
-    const theoMay = selectedPrinterIds.map(
-      (_, idx) => luots.filter((l) => l.printerIndex === idx).length
-    );
+    const theoMay = selectedPrinterIds.map((id, idx) => ({
+      ten: printers.find((p) => p.id === id)?.name ?? id,
+      soLuot: luots.filter((l) => l.printerIndex === idx).length,
+      moiMam: sucChuaTheoMay(selectedPrinterIds, printerLimits, moiMam)[idx],
+    }));
     return { soLuot: luots.length, theoMay, duCuoi: luots[luots.length - 1].quantity };
-  }, [form.totalQuantity, form.perSheetQty, selectedPrinterIds]);
+  }, [form.totalQuantity, form.perSheetQty, selectedPrinterIds, printerLimits, printers]);
+
+  const previewChiaLai = useMemo(() => {
+    const tong = Number(editSplit.totalQuantity);
+    const moiMam = Number(editSplit.perSheetQty);
+    if (!tong || !moiMam || editPrinterIds.length === 0) return null;
+    const sucChua = sucChuaTheoMay(editPrinterIds, editLimits, moiMam);
+    const luots = chiaLuotInTheoMay(tong, sucChua);
+    if (luots.length === 0) return null;
+    return {
+      soLuot: luots.length,
+      theoMay: editPrinterIds.map((id, idx) => ({
+        ten: printers.find((p) => p.id === id)?.name ?? id,
+        soLuot: luots.filter((l) => l.printerIndex === idx).length,
+        moiMam: sucChua[idx],
+      })),
+    };
+  }, [editSplit, editPrinterIds, editLimits, printers]);
 
   const toggleMay = (id: string) => {
     setSelectedPrinterIds((cu) => (cu.includes(id) ? cu.filter((x) => x !== id) : [...cu, id]));
@@ -249,6 +357,11 @@ export default function BulkProductionTab() {
           totalQuantity: Number(form.totalQuantity),
           perSheetQty: Number(form.perSheetQty),
           printerIds: selectedPrinterIds,
+          printerLimits: Object.fromEntries(
+            selectedPrinterIds
+              .filter((id) => Number(printerLimits[id]) > 0)
+              .map((id) => [id, Number(printerLimits[id])])
+          ),
         }),
       });
       const data = await res.json();
@@ -256,6 +369,7 @@ export default function BulkProductionTab() {
         notify(data.message, 'success');
         setForm({ orderCode: '', customerName: '', productName: '', totalQuantity: '', perSheetQty: '', note: '' });
         setSelectedPrinterIds([]);
+        setPrinterLimits({});
         setShowForm(false);
         await fetchData();
         setSelectedOrderId(data.data.id);
@@ -272,6 +386,26 @@ export default function BulkProductionTab() {
   const batDauSua = (order: BulkOrder) => {
     setEditing(order);
     setShowForm(false);
+    setChiaLai(false);
+    setEditSplit({
+      totalQuantity: String(order.totalQuantity),
+      perSheetQty: String(order.perSheetQty),
+    });
+
+    // Thứ tự máy và sức chứa mâm không được lưu riêng ở DB, nhưng suy lại được từ
+    // chính các lượt: máy xuất hiện lần đầu ở đâu là thứ tự đó, lượt đầy nhất của
+    // máy chính là số con/mâm của nó (lượt cuối có thể lẻ nên phải lấy max).
+    const thuTu: string[] = [];
+    const sucChua: Record<string, string> = {};
+    for (const run of order.runs) {
+      if (!run.printerId) continue;
+      if (!thuTu.includes(run.printerId)) thuTu.push(run.printerId);
+      const cu = Number(sucChua[run.printerId] || 0);
+      if (run.quantity > cu) sucChua[run.printerId] = String(run.quantity);
+    }
+    setEditPrinterIds(thuTu);
+    setEditLimits(sucChua);
+
     setEditForm({
       orderCode: order.orderCode || '',
       customerName: order.customerName || '',
@@ -308,6 +442,56 @@ export default function BulkProductionTab() {
       notify('Lỗi kết nối khi lưu đơn');
     }
     setSaving(false);
+  };
+
+  const handleChiaLai = () => {
+    if (!editing) return;
+    const tong = Number(editSplit.totalQuantity);
+    const moiMam = Number(editSplit.perSheetQty);
+    if (!tong) return notify('Vui lòng nhập tổng số con');
+    if (!moiMam) return notify('Vui lòng nhập số con mỗi mâm PEI');
+    if (editPrinterIds.length === 0) return notify('Vui lòng chọn ít nhất 1 máy in');
+
+    const daChay = editing.runs.filter((r) => r.status !== 'pending').length;
+    window.dispatchEvent(
+      new CustomEvent('appConfirm', {
+        detail: {
+          title: 'Chia lại lượt in',
+          message:
+            `Toàn bộ ${editing.runs.length} lượt hiện tại sẽ bị xóa và cấp mã vạch mới. ` +
+            `Tem đã in ra thành rác, phải in lại` +
+            (daChay > 0 ? ` — kể cả ${daChay} lượt đã quẹt (mốc giờ mất hết).` : '.'),
+          onConfirm: async () => {
+            setSaving(true);
+            try {
+              const res = await fetch(`/api/bulk-orders/${editing.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  totalQuantity: tong,
+                  perSheetQty: moiMam,
+                  printerIds: editPrinterIds,
+                  printerLimits: Object.fromEntries(
+                    editPrinterIds
+                      .filter((id) => Number(editLimits[id]) > 0)
+                      .map((id) => [id, Number(editLimits[id])])
+                  ),
+                }),
+              });
+              const data = await res.json();
+              if (data.status === 'success') {
+                notify(data.message || 'Đã chia lại lượt in', 'success');
+                setEditing(null);
+                fetchData();
+              } else notify(data.message || 'Lỗi chia lại lượt in');
+            } catch {
+              notify('Lỗi kết nối khi chia lại lượt in');
+            }
+            setSaving(false);
+          },
+        },
+      })
+    );
   };
 
   const handleDeleteOrder = (order: BulkOrder) => {
@@ -512,39 +696,17 @@ export default function BulkProductionTab() {
 
           <div>
             <label className="block text-xs text-slate-500 dark:text-slate-400 mb-2">
-              Chọn máy in chạy đơn này * (số thứ tự = thứ tự nhận lượt)
+              Chọn máy in chạy đơn này * (số thứ tự = thứ tự nhận lượt · ô bên phải là số
+              con/mâm riêng của máy đó, bỏ trống thì dùng số chung ở trên)
             </label>
-            {printers.length === 0 ? (
-              <div className="text-xs text-slate-500 py-3">Chưa có máy in nào trong hệ thống</div>
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                {printers.map((p) => {
-                  const idx = selectedPrinterIds.indexOf(p.id);
-                  const chon = idx >= 0;
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => toggleMay(p.id)}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-all text-left ${
-                        chon
-                          ? 'bg-indigo-500/10 border-indigo-500 text-indigo-600 dark:text-indigo-300'
-                          : 'bg-slate-100 dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-indigo-400'
-                      }`}
-                    >
-                      <span
-                        className={`w-5 h-5 shrink-0 rounded-full text-[10px] font-bold flex items-center justify-center ${
-                          chon ? 'bg-indigo-600 text-white' : 'bg-slate-300 dark:bg-slate-700 text-slate-500'
-                        }`}
-                      >
-                        {chon ? idx + 1 : '·'}
-                      </span>
-                      <span className="truncate">{p.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            <MayPicker
+              printers={printers}
+              selectedIds={selectedPrinterIds}
+              limits={printerLimits}
+              moiMamChung={form.perSheetQty}
+              onToggle={toggleMay}
+              onLimit={(id, value) => setPrinterLimits((cu) => ({ ...cu, [id]: value }))}
+            />
           </div>
 
           {previewLuots && (
@@ -553,7 +715,7 @@ export default function BulkProductionTab() {
               <span className="font-bold text-indigo-600 dark:text-indigo-300">{previewLuots.soLuot} lượt in</span> trên{' '}
               {selectedPrinterIds.length} máy —{' '}
               {previewLuots.theoMay
-                .map((n, i) => `${printers.find((p) => p.id === selectedPrinterIds[i])?.name}: ${n} lượt`)
+                .map((m) => `${m.ten}: ${m.soLuot} lượt × ${m.moiMam} con`)
                 .join(' · ')}
               {previewLuots.duCuoi !== Number(form.perSheetQty) && (
                 <span className="text-amber-500"> (lượt cuối chỉ {previewLuots.duCuoi} con)</span>
@@ -634,9 +796,99 @@ export default function BulkProductionTab() {
           </div>
 
           <div className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            Tổng số con, số con mỗi mâm và danh sách máy không sửa được: lượt in đã chia và
-            tem mã vạch đã in ra rồi — muốn chia lại thì xóa đơn và tạo đơn mới. Trạng thái
-            đơn cũng sẽ tự tính lại theo các lượt mỗi khi quẹt mã.
+            Trạng thái đơn sẽ tự tính lại theo các lượt mỗi khi quẹt mã.
+          </div>
+
+          {/* Chia lại lượt: tách khỏi nút Lưu vì nó xóa sạch lượt cũ + mã vạch cũ */}
+          <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
+            {!chiaLai ? (
+              <button
+                onClick={() => setChiaLai(true)}
+                className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400 hover:underline"
+              >
+                <RotateCcw size={14} /> Đổi số lượng / máy in (chia lại lượt in)
+              </button>
+            ) : (
+              <div className="space-y-3">
+                <div className="text-xs text-rose-500 leading-relaxed">
+                  Chia lại sẽ xóa toàn bộ {editing.runs.length} lượt hiện tại và cấp mã vạch mới:
+                  tem đã in ra thành rác, mốc check-in/check-out đã ghi mất hết. Chỉ làm khi đơn
+                  chưa chạy hoặc chấp nhận in lại tem.
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">
+                      Tổng số con *
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={editSplit.totalQuantity}
+                      onChange={(e) => setEditSplit({ ...editSplit, totalQuantity: e.target.value })}
+                      className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">
+                      Số con mỗi mâm PEI (dùng chung) *
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={editSplit.perSheetQty}
+                      onChange={(e) => setEditSplit({ ...editSplit, perSheetQty: e.target.value })}
+                      className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-slate-500 dark:text-slate-400 mb-2">
+                    Máy in chạy đơn (số thứ tự = thứ tự nhận lượt · ô bên phải là số con/mâm
+                    riêng của máy đó)
+                  </label>
+                  <MayPicker
+                    printers={printers}
+                    selectedIds={editPrinterIds}
+                    limits={editLimits}
+                    moiMamChung={editSplit.perSheetQty}
+                    onToggle={(id) =>
+                      setEditPrinterIds((cu) =>
+                        cu.includes(id) ? cu.filter((x) => x !== id) : [...cu, id]
+                      )
+                    }
+                    onLimit={(id, value) => setEditLimits((cu) => ({ ...cu, [id]: value }))}
+                  />
+                </div>
+
+                {previewChiaLai && (
+                  <div className="bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-4 text-sm text-slate-600 dark:text-slate-300">
+                    Sẽ chia lại thành{' '}
+                    <span className="font-bold text-indigo-600 dark:text-indigo-300">
+                      {previewChiaLai.soLuot} lượt in
+                    </span>{' '}
+                    — {previewChiaLai.theoMay.map((m) => `${m.ten}: ${m.soLuot} lượt × ${m.moiMam} con`).join(' · ')}
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleChiaLai}
+                    disabled={saving}
+                    className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold rounded-xl disabled:opacity-50"
+                  >
+                    {saving ? 'Đang chia lại...' : 'Chia lại lượt in'}
+                  </button>
+                  <button
+                    onClick={() => setChiaLai(false)}
+                    className="px-6 py-2.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-semibold rounded-xl"
+                  >
+                    Bỏ
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex gap-2">

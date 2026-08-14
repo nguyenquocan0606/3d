@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chiaLuotIn, trangThaiDon, dinhDangThoiLuong } from '../bulk-production';
+import { chiaLuotIn, chiaLuotInTheoMay, trangThaiDon, dinhDangThoiLuong } from '../bulk-production';
 
 describe('chiaLuotIn', () => {
   it('chia hết: 200 con, 50 con/mâm, 2 máy → 4 lượt đều 50 con', () => {
@@ -32,6 +32,27 @@ describe('chiaLuotIn', () => {
     expect(chiaLuotIn(100, 0, 2)).toEqual([]);
     expect(chiaLuotIn(100, 50, 0)).toEqual([]);
     expect(chiaLuotIn(NaN, 50, 2)).toEqual([]);
+  });
+});
+
+describe('chiaLuotInTheoMay', () => {
+  it('mỗi máy xếp theo sức chứa mâm riêng của nó', () => {
+    // Máy 1 khổ to (100 con/mâm), máy 2 khổ nhỏ (40 con/mâm).
+    const luots = chiaLuotInTheoMay(280, [100, 40]);
+    expect(luots.map((l) => l.quantity)).toEqual([100, 40, 100, 40]);
+    expect(luots.map((l) => l.printerIndex)).toEqual([0, 1, 0, 1]);
+    expect(luots.filter((l) => l.printerIndex === 1).map((l) => l.peiIndex)).toEqual([1, 2]);
+    expect(luots.reduce((s, l) => s + l.quantity, 0)).toBe(280);
+  });
+
+  it('lượt cuối vẫn nhận phần dư', () => {
+    const luots = chiaLuotInTheoMay(150, [100, 40]);
+    expect(luots.map((l) => l.quantity)).toEqual([100, 40, 10]);
+  });
+
+  it('sức chứa <= 0 thì trả mảng rỗng thay vì lặp vô hạn', () => {
+    expect(chiaLuotInTheoMay(100, [50, 0])).toEqual([]);
+    expect(chiaLuotInTheoMay(100, [])).toEqual([]);
   });
 });
 

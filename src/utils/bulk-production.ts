@@ -14,7 +14,48 @@ export interface LuotInDuKien {
 }
 
 /**
- * Chia đơn thành danh sách lượt in.
+ * Chia đơn thành danh sách lượt in, mỗi máy có sức chứa mâm riêng.
+ *
+ * `sucChuaMoiMay[i]` = số con xếp vừa 1 mâm PEI **của máy thứ i**. Máy khổ bàn khác
+ * nhau thì xếp được số con khác nhau, nên không ép chung một con số; máy nào không
+ * khai riêng thì phía gọi truyền sẵn số chung vào đây.
+ *
+ * Vẫn chia vòng tròn: máy 1 → máy 2 → ... → quay lại máy 1, cho tới khi đủ tổng.
+ * Lượt cuối nhận phần dư (VD tổng 250, mâm 60 → 4 mâm đầy + 1 mâm 10 con).
+ */
+export function chiaLuotInTheoMay(tongSoCon: number, sucChuaMoiMay: number[]): LuotInDuKien[] {
+  if (!Number.isFinite(tongSoCon) || tongSoCon <= 0) return [];
+  if (sucChuaMoiMay.length === 0) return [];
+
+  const tong = Math.floor(tongSoCon);
+  const sucChua = sucChuaMoiMay.map((n) => Math.floor(Number(n)));
+  // Máy khai sức chứa <= 0 sẽ làm vòng lặp chạy mãi mà không xếp được con nào.
+  if (sucChua.some((n) => !Number.isFinite(n) || n <= 0)) return [];
+
+  const luots: LuotInDuKien[] = [];
+  const soMamDaXep = new Array(sucChua.length).fill(0);
+  let daXep = 0;
+  let luotThu = 0;
+
+  while (daXep < tong) {
+    const may = luotThu % sucChua.length;
+    const quantity = Math.min(sucChua[may], tong - daXep);
+    soMamDaXep[may] += 1;
+    luots.push({
+      seq: luots.length + 1,
+      printerIndex: may,
+      peiIndex: soMamDaXep[may],
+      quantity,
+    });
+    daXep += quantity;
+    luotThu += 1;
+  }
+
+  return luots;
+}
+
+/**
+ * Chia đơn khi mọi máy dùng chung một số con/mâm.
  *
  * Lượt cuối cùng nhận phần dư (VD tổng 250, mỗi mâm 60 → 4 mâm đầy 60 + 1 mâm 10 con).
  * Round-robin nên máy thứ k nhận các lượt k, k+soMay, k+2*soMay...
@@ -24,28 +65,9 @@ export function chiaLuotIn(
   soConMoiMam: number,
   soMay: number
 ): LuotInDuKien[] {
-  if (!Number.isFinite(tongSoCon) || tongSoCon <= 0) return [];
-  if (!Number.isFinite(soConMoiMam) || soConMoiMam <= 0) return [];
   if (!Number.isFinite(soMay) || soMay <= 0) return [];
-
-  const tong = Math.floor(tongSoCon);
-  const moiMam = Math.floor(soConMoiMam);
-  const may = Math.floor(soMay);
-
-  const soLuot = Math.ceil(tong / moiMam);
-  const luots: LuotInDuKien[] = [];
-
-  for (let i = 0; i < soLuot; i++) {
-    const daXep = i * moiMam;
-    luots.push({
-      seq: i + 1,
-      printerIndex: i % may,
-      peiIndex: Math.floor(i / may) + 1,
-      quantity: Math.min(moiMam, tong - daXep),
-    });
-  }
-
-  return luots;
+  if (!Number.isFinite(soConMoiMam) || soConMoiMam <= 0) return [];
+  return chiaLuotInTheoMay(tongSoCon, new Array(Math.floor(soMay)).fill(soConMoiMam));
 }
 
 /**

@@ -1,7 +1,6 @@
 import prisma from '@/utils/db';
 import { ok, fail } from '@/utils/api-response';
-import { generateUniqueBarcode } from '@/utils/barcode';
-import { chiaLuotIn } from '@/utils/bulk-production';
+import { chuanBiLuotIn, LoiChiaLuot } from '@/services/bulk-run.service';
 
 export async function GET() {
   try {
@@ -23,6 +22,9 @@ export async function GET() {
 /**
  * Tạo đơn sản xuất số lượng lớn: nhập tổng số con + số con/mâm PEI + danh sách máy in,
  * hệ thống tự chia thành các lượt in và cấp mã vạch riêng cho từng lượt.
+ *
+ * `printerLimits` (tùy chọn) khai số con/mâm riêng cho từng máy — máy khổ bàn khác
+ * nhau thì xếp được số con khác nhau; máy không khai thì dùng `perSheetQty` chung.
  */
 export async function POST(req: Request) {
   try {
@@ -34,6 +36,7 @@ export async function POST(req: Request) {
       totalQuantity,
       perSheetQty,
       printerIds,
+      printerLimits,
       note,
     } = body as {
       orderCode?: string;
@@ -42,16 +45,11 @@ export async function POST(req: Request) {
       totalQuantity?: number | string;
       perSheetQty?: number | string;
       printerIds?: string[];
+      printerLimits?: Record<string, number>;
       note?: string;
     };
 
-    const tong = Math.floor(Number(totalQuantity));
-    const moiMam = Math.floor(Number(perSheetQty));
-
     if (!productName || !productName.trim()) return fail('Vui lòng nhập tên sản phẩm', 400);
-    if (!Number.isFinite(tong) || tong <= 0) return fail('Tổng số con phải lớn hơn 0', 400);
-    if (!Number.isFinite(moiMam) || moiMam <= 0) return fail('Số con mỗi mâm PEI phải lớn hơn 0', 400);
-    if (!Array.isArray(printerIds) || printerIds.length === 0) return fail('Vui lòng chọn ít nhất 1 máy in', 400);
 
     const maDon = orderCode?.trim() || null;
     if (maDon) {
@@ -59,36 +57,20 @@ export async function POST(req: Request) {
       if (trung) return fail('Mã đơn đã tồn tại. Vui lòng chọn mã khác.', 400);
     }
 
-    // Giữ đúng thứ tự người dùng chọn máy để lượt PEI 1 rơi vào máy đầu danh sách
-    const printers = await prisma.printer.findMany({ where: { id: { in: printerIds } } });
-    const printerTheoThuTu = printerIds
-      .map((id) => printers.find((p) => p.id === id))
-      .filter((p): p is (typeof printers)[number] => Boolean(p));
-    if (printerTheoThuTu.length === 0) return fail('Không tìm thấy máy in đã chọn', 400);
-
-    const luots = chiaLuotIn(tong, moiMam, printerTheoThuTu.length);
-
-    // Sinh mã vạch trước, ngoài transaction, để không giữ transaction mở trong lúc query trùng mã
-    const taken = new Set<string>();
-    const runsToCreate: Array<{
-      id: string;
-      printerId: string;
-      printerName: string;
-      seq: number;
-      peiIndex: number;
-      quantity: number;
-    }> = [];
-    for (const luot of luots) {
-      const may = printerTheoThuTu[luot.printerIndex];
-      runsToCreate.push({
-        id: await generateUniqueBarcode(taken),
-        printerId: may.id,
-        printerName: may.name,
-        seq: luot.seq,
-        peiIndex: luot.peiIndex,
-        quantity: luot.quantity,
+    let runsToCreate;
+    try {
+      runsToCreate = await chuanBiLuotIn({
+        totalQuantity: Number(totalQuantity),
+        perSheetQty: Number(perSheetQty),
+        printerIds: printerIds ?? [],
+        printerLimits,
       });
+    } catch (error) {
+      if (error instanceof LoiChiaLuot) return fail(error.message, 400);
+      throw error;
     }
+
+    const soMay = new Set(runsToCreate.map((r) => r.printerId)).size;
 
     const order = await prisma.$transaction(async (tx) => {
       const donMoi = await tx.bulkOrder.create({
@@ -96,8 +78,8 @@ export async function POST(req: Request) {
           orderCode: maDon,
           customerName: customerName?.trim() || 'Khách lẻ',
           productName: productName.trim(),
-          totalQuantity: tong,
-          perSheetQty: moiMam,
+          totalQuantity: Math.floor(Number(totalQuantity)),
+          perSheetQty: Math.floor(Number(perSheetQty)),
           note: note?.trim() || null,
           status: 'pending',
         },
@@ -115,7 +97,7 @@ export async function POST(req: Request) {
       include: { runs: { include: { printer: true }, orderBy: { seq: 'asc' } } },
     });
 
-    return ok(full, `Đã tạo đơn với ${runsToCreate.length} lượt in trên ${printerTheoThuTu.length} máy`);
+    return ok(full, `Đã tạo đơn với ${runsToCreate.length} lượt in trên ${soMay} máy`);
   } catch (error: unknown) {
     return fail(error instanceof Error ? error.message : 'Lỗi máy chủ');
   }
