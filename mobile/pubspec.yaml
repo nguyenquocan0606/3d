@@ -14,6 +14,7 @@ dependencies:
   # Cần cho locale vi_VN của Material (nếu thiếu, đặt locale 'vi' sẽ crash).
   flutter_localizations:
     sdk: flutter
+  intl: ^0.20.3
 
   # State & routing
   flutter_riverpod: ^2.6.1
