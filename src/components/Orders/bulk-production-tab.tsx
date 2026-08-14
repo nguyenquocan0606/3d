@@ -97,6 +97,9 @@ export default function BulkProductionTab() {
   });
   const [saving, setSaving] = useState(false);
 
+  // Lượt đang chờ quẹt tem máy in để bắt đầu (bước 2 của check-in).
+  const [choMay, setChoMay] = useState<{ run: BulkRun; productName: string } | null>(null);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -128,21 +131,23 @@ export default function BulkProductionTab() {
   }, [fetchData]);
 
   // ── Quẹt mã check-in / check-out ──
-  const xuLyQuetMa = useCallback(
-    async (code: string) => {
-      const ma = code.trim();
-      if (!ma) return;
-      setScannedId('');
+  //
+  // Bắt đầu in là **2 bước**: quẹt mã lượt rồi quẹt tem máy in. Máy chạy thật hay
+  // khác máy được chia lúc tạo đơn (máy kẹt nhựa, dồn mâm sang máy đang rảnh), nên
+  // máy nào được quẹt thì lượt gán về đúng máy đó. Chốt in xong chỉ cần mã lượt.
+  const guiQuetMa = useCallback(
+    async (runId: string, printerId?: string) => {
       try {
         const res = await fetch('/api/bulk-runs/scan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: ma }),
+          body: JSON.stringify({ code: runId, ...(printerId ? { printerId } : {}) }),
         });
         const data = await res.json();
         if (data.status === 'success') {
           notify(data.message, 'success');
           setSelectedOrderId(data.data.run.orderId);
+          setChoMay(null);
           fetchData();
         } else {
           notify(data.message || 'Lỗi khi quẹt mã');
@@ -154,6 +159,49 @@ export default function BulkProductionTab() {
     [fetchData]
   );
 
+  const timLuot = useCallback(
+    (ma: string) => {
+      for (const order of orders) {
+        const run = order.runs.find((r) => r.id === ma);
+        if (run) return { run, productName: order.productName };
+      }
+      return null;
+    },
+    [orders]
+  );
+
+  const xuLyQuetMa = useCallback(
+    async (code: string) => {
+      const ma = code.trim();
+      if (!ma) return;
+      setScannedId('');
+
+      // Bước 2: đang đợi tem máy in.
+      if (choMay) {
+        const chuanHoa = ma.replace(/-/g, '').toUpperCase();
+        const may = printers.find((p) => p.id.replace(/-/g, '').toUpperCase() === chuanHoa);
+        if (!may) {
+          notify(`"${ma}" không phải mã máy in. Quẹt tem máy để bắt đầu, hoặc bấm Hủy.`);
+          return;
+        }
+        await guiQuetMa(choMay.run.id, may.id);
+        return;
+      }
+
+      // Bước 1: mã lượt.
+      const found = timLuot(ma);
+      if (found && found.run.status === 'pending') {
+        setChoMay(found);
+        notify(`Lượt PEI ${found.run.peiIndex} (${found.run.quantity} con) — quẹt tiếp tem MÁY IN`, 'info');
+        return;
+      }
+
+      // Lượt đang in (chốt xong) hoặc mã lạ — để backend trả lời cho đúng câu.
+      await guiQuetMa(ma);
+    },
+    [choMay, guiQuetMa, printers, timLuot]
+  );
+
   // Máy quét HID toàn cục: page.tsx bắn event này khi đang ở tab Sản xuất và mã toàn số
   useEffect(() => {
     const handler = (event: Event) => {
@@ -161,7 +209,11 @@ export default function BulkProductionTab() {
       if (code) xuLyQuetMa(code);
     };
     window.addEventListener('productionNumericScanned', handler);
-    return () => window.removeEventListener('productionNumericScanned', handler);
+    window.addEventListener('productionCodeScanned', handler);
+    return () => {
+      window.removeEventListener('productionNumericScanned', handler);
+      window.removeEventListener('productionCodeScanned', handler);
+    };
   }, [xuLyQuetMa]);
 
   // ── Tạo đơn ──
@@ -348,9 +400,26 @@ export default function BulkProductionTab() {
       {/* Ô quẹt mã check-in / check-out */}
       <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xl">
         <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-          Quẹt mã lượt in — lần 1 là <span className="text-amber-500 font-semibold">bắt đầu in</span>, lần 2 là{' '}
-          <span className="text-emerald-500 font-semibold">in xong</span>
+          Quẹt mã lượt in — lần 1 là <span className="text-amber-500 font-semibold">bắt đầu in</span>{' '}
+          (quẹt tiếp tem máy in), lần 2 là <span className="text-emerald-500 font-semibold">in xong</span>
         </label>
+
+        {choMay && (
+          <div className="mb-3 flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30">
+            <PrinterIcon size={18} className="text-amber-500 shrink-0" />
+            <div className="text-sm text-amber-600 dark:text-amber-300 flex-1">
+              Đang chờ <span className="font-semibold">tem MÁY IN</span> cho lượt PEI{' '}
+              {choMay.run.peiIndex} · {choMay.run.quantity} con ({choMay.productName}). Quẹt tem máy
+              nào thì lượt được gán về máy đó.
+            </div>
+            <button
+              onClick={() => setChoMay(null)}
+              className="text-xs text-slate-500 hover:text-rose-500 shrink-0"
+            >
+              Hủy
+            </button>
+          </div>
+        )}
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -365,7 +434,7 @@ export default function BulkProductionTab() {
               type="text"
               value={scannedId}
               onChange={(e) => setScannedId(e.target.value)}
-              placeholder="Nhập hoặc quét mã lượt in (VD: 12345678)..."
+              placeholder={choMay ? 'Quẹt tem máy in...' : 'Nhập hoặc quét mã lượt in (VD: 12345678)...'}
               className="w-full bg-slate-50 dark:bg-[#1f2937] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-xl pl-10 pr-4 py-3 focus:outline-hidden focus:border-indigo-500"
             />
           </div>
@@ -786,8 +855,16 @@ export default function BulkProductionTab() {
                                 </button>
                                 {run.status !== 'completed' && (
                                   <button
-                                    onClick={() => xuLyQuetMa(run.id)}
-                                    title={run.status === 'pending' ? 'Ghi nhận bắt đầu in' : 'Ghi nhận in xong'}
+                                    onClick={() =>
+                                      run.status === 'pending'
+                                        ? setChoMay({ run, productName: selectedOrder.productName })
+                                        : xuLyQuetMa(run.id)
+                                    }
+                                    title={
+                                      run.status === 'pending'
+                                        ? 'Bắt đầu in — quẹt tiếp tem máy in'
+                                        : 'Ghi nhận in xong'
+                                    }
                                     className={`p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 ${
                                       run.status === 'pending'
                                         ? 'text-amber-500 hover:text-amber-400'

@@ -27,8 +27,10 @@ class ScanOption {
   final String? detail;
   final Color color;
 
-  /// Trả về thông báo để hiện sau khi bảng đóng (null nếu không cần).
-  final Future<String?> Function() run;
+  /// Chạy việc đã chọn, trả về thông báo để hiện sau khi bảng đóng (null nếu
+  /// không cần). Nhận [BuildContext] vì có việc còn phải mở thêm máy quét — như
+  /// bắt đầu lượt SLL phải quét tiếp tem máy in.
+  final Future<String?> Function(BuildContext context) run;
 }
 
 /// Mô tả mã vừa quét: quét ra cái gì và làm được những gì với nó.
@@ -96,7 +98,7 @@ class _ScanResultSheetState extends ConsumerState<_ScanResultSheet> {
   Future<void> _select(ScanOption option) async {
     setState(() => _busy = true);
     try {
-      final message = await option.run();
+      final message = await option.run(context);
       if (!mounted) return;
       // Màn quét 1 lần đóng ngay sau đó nên thông báo trả về bị bỏ qua — bắn
       // toast ở tầng ScaffoldMessenger để kết quả không biến mất theo.
@@ -252,7 +254,7 @@ ScanTargetInfo scanTargetInfo(
         icon: icon,
         label: label,
         detail: detail,
-        run: () async {
+        run: (_) async {
           onOpen(route);
           return null;
         },
@@ -327,7 +329,7 @@ ScanTargetInfo scanTargetInfo(
             icon: Icons.link_rounded,
             label: 'Bật chế độ gán cuộn vào Line ${scanned.slot}',
             detail: 'Sau đó quét liên tiếp mã cuộn nhựa để gán',
-            run: () async {
+            run: (_) async {
               ref.read(scanModeProvider.notifier).start(
                     ScanMode(
                       target: ScanTarget.printer,
@@ -456,14 +458,18 @@ ScanTargetInfo _bulkRunInfo(
     );
   }
 
-  final xong = run.status == BulkStatus.completed;
-  final batDau = run.status == BulkStatus.pending;
+  // Gán sang biến final trước khi dựng closure: `run`/`parent` là biến có thể gán
+  // lại nên bên trong closure sẽ không còn được suy ra là non-null.
+  final BulkRun luot = run;
+  final BulkOrder don = parent;
+  final xong = luot.status == BulkStatus.completed;
+  final batDau = luot.status == BulkStatus.pending;
 
   return ScanTargetInfo(
-    kindLabel: 'Lượt in SLL · ${parent.productName}',
-    title: '${run.printerName} · PEI ${run.peiIndex}',
-    subtitle: '${run.quantity} con · ${run.status.label}'
-        '${batDau ? '' : ' · bắt đầu ${_shortTime(run.startedAt)}'}',
+    kindLabel: 'Lượt in SLL · ${don.productName}',
+    title: '${luot.printerName} · PEI ${luot.peiIndex}',
+    subtitle: '${luot.quantity} con · ${luot.status.label}'
+        '${batDau ? '' : ' · bắt đầu ${_shortTime(luot.startedAt)}'}',
     icon: Icons.play_circle_rounded,
     color: AppColors.info,
     note: xong ? 'Lượt này đã in xong — muốn quẹt lại thì đặt lại ở màn đơn.' : null,
@@ -471,15 +477,16 @@ ScanTargetInfo _bulkRunInfo(
       if (!xong)
         ScanOption(
           icon: batDau ? Icons.play_arrow_rounded : Icons.check_rounded,
-          label: batDau ? 'Ghi nhận bắt đầu in' : 'Ghi nhận in xong',
+          label: batDau ? 'Bắt đầu in — quét tiếp máy' : 'Ghi nhận in xong',
           detail: batDau
-              ? 'Bấm giờ bắt đầu cho lượt ${run.quantity} con này'
+              ? 'Quét tem máy in đang chạy lượt ${luot.quantity} con này'
               : 'Chốt giờ kết thúc và tính thời lượng',
           color: batDau ? AppColors.warning : AppColors.success,
-          run: () => scanBulkRun(ref, scanned.id!),
+          run: (context) => batDau
+              ? startBulkRunByScanningPrinter(context, ref, luot)
+              : finishBulkRun(ref, luot.id),
         ),
-      open('Mở đơn SLL', Icons.open_in_new_rounded,
-          Routes.bulkOrderDetail(parent.id),
+      open('Mở đơn SLL', Icons.open_in_new_rounded, Routes.bulkOrderDetail(don.id),
           detail: 'Xem toàn bộ lượt của đơn'),
     ],
   );
@@ -498,7 +505,7 @@ ScanTargetInfo _commandInfo(WidgetRef ref, ScannedCode scanned) {
           label: 'Bắt đầu phiên kiểm kho mới',
           detail: 'Xóa kết quả phiên đang mở và đếm lại từ đầu',
           color: AppColors.danger,
-          run: () async {
+          run: (_) async {
             await ref.read(inventorySessionProvider.notifier).reset();
             return 'Đã bắt đầu phiên kiểm kho mới.';
           },

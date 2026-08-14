@@ -43,6 +43,30 @@ class BulkRepository {
         },
       );
 
+  /// Sửa phần thông tin của đơn.
+  ///
+  /// Backend **không** cho đổi tổng số con / số con mỗi mâm / danh sách máy: lượt
+  /// in đã chia xong và tem mã vạch đã in ra, muốn chia lại thì xóa đơn tạo mới.
+  Future<void> updateOrder(
+    String id, {
+    required String productName,
+    String? orderCode,
+    String? customerName,
+    String? note,
+    BulkStatus? status,
+  }) =>
+      _api.patch<void>(
+        '/api/bulk-orders/${Uri.encodeComponent(id)}',
+        (_) {},
+        body: {
+          'productName': productName,
+          'orderCode': orderCode ?? '',
+          'customerName': customerName?.isEmpty ?? true ? 'Khách lẻ' : customerName,
+          'note': note?.isEmpty ?? true ? null : note,
+          if (status != null) 'status': status.value,
+        },
+      );
+
   /// Xóa đơn kèm toàn bộ lượt (Cascade) — mốc check-in/out đã ghi sẽ mất.
   Future<void> deleteOrder(String id) =>
       _api.delete<void>('/api/bulk-orders/${Uri.encodeComponent(id)}', (_) {});
@@ -51,7 +75,9 @@ class BulkRepository {
   ///
   /// Quẹt lượt đã xong thì backend trả lỗi kèm mốc giờ cũ — [ApiException] mang
   /// sẵn câu tiếng Việt nên cứ hiển thị thẳng.
-  Future<BulkScanResult> scanRun(String code) => _api.post(
+  /// [printerId] chỉ dùng cho lần quẹt check-in: máy quẹt kèm là máy chạy thật,
+  /// backend gán lại lượt về máy đó (có thể khác máy được chia lúc tạo đơn).
+  Future<BulkScanResult> scanRun(String code, {String? printerId}) => _api.post(
         '/api/bulk-runs/scan',
         (data) {
           final map = asMap(data);
@@ -60,7 +86,10 @@ class BulkRepository {
             isCheckIn: asString(map['action']) == 'check-in',
           );
         },
-        body: {'code': code},
+        body: {
+          'code': code,
+          if (printerId != null) 'printerId': printerId,
+        },
       );
 
   /// Sửa tay 1 lượt — dùng khi quẹt nhầm. `status: pending` xóa luôn mốc giờ.

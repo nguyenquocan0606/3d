@@ -8,9 +8,9 @@ import '../../data/models/bulk_order.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/bulk_repository.dart';
 import '../../data/repositories/label_repository.dart';
-import '../scanner/scanner_screen.dart';
 import 'bulk_orders_screen.dart';
 import 'bulk_scan.dart';
+import 'edit_bulk_order_sheet.dart';
 
 /// Chi tiết 1 đơn SLL: lượt in gom theo máy, mỗi lượt quẹt được ngay tại chỗ.
 class BulkOrderDetailScreen extends ConsumerWidget {
@@ -29,28 +29,22 @@ class BulkOrderDetailScreen extends ConsumerWidget {
         actions: [
           IconButton(
             tooltip: 'Quẹt mã lượt in',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => ScannerScreen(
-                  title: 'Quẹt mã lượt in',
-                  hint: 'Lần 1 = bắt đầu in · Lần 2 = in xong',
-                  continuous: true,
-                  onCode: (code) => scanBulkRun(ref, code),
-                ),
-              ),
-            ),
+            onPressed: () => openBulkRunScanner(context, ref),
             icon: const Icon(Icons.qr_code_scanner_rounded),
           ),
           if (order != null)
             PopupMenuButton<String>(
               onSelected: (value) async {
-                if (value == 'labels') {
+                if (value == 'edit') {
+                  await showEditBulkOrderSheet(context, order);
+                } else if (value == 'labels') {
                   await _printLabels(context, ref, order, order.runs);
                 } else if (value == 'delete') {
                   await _deleteOrder(context, ref, order);
                 }
               },
               itemBuilder: (_) => const [
+                PopupMenuItem(value: 'edit', child: Text('Sửa thông tin đơn')),
                 PopupMenuItem(value: 'labels', child: Text('In toàn bộ tem lượt')),
                 PopupMenuItem(value: 'delete', child: Text('Xóa đơn')),
               ],
@@ -209,12 +203,15 @@ class _RunRowState extends ConsumerState<_RunRow> {
   bool _busy = false;
 
   /// Bấm nút = quẹt tay đúng mã lượt đó, dùng chung endpoint với camera nên
-  /// vòng đời check-in/check-out không bao giờ lệch nhau.
+  /// vòng đời check-in/check-out không bao giờ lệch nhau. Riêng "bắt đầu in" vẫn
+  /// phải quét tem máy in — chính chỗ đó quyết định lượt này chạy máy nào.
   Future<void> _scan() async {
     setState(() => _busy = true);
     try {
-      final message = await scanBulkRun(ref, widget.run.id);
-      if (mounted) showToast(context, message);
+      final message = widget.run.status == BulkStatus.pending
+          ? await startBulkRunByScanningPrinter(context, ref, widget.run)
+          : await finishBulkRun(ref, widget.run.id);
+      if (mounted && message != null) showToast(context, message);
     } catch (error) {
       if (mounted) showToast(context, '$error', isError: true);
     } finally {

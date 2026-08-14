@@ -7,7 +7,6 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../../data/models/bulk_order.dart';
 import '../../data/providers.dart';
-import '../scanner/scanner_screen.dart';
 import 'bulk_scan.dart';
 
 Color colorForBulkStatus(BulkStatus status) => switch (status) {
@@ -49,16 +48,7 @@ class BulkOrdersScreen extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: FilledButton.icon(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => ScannerScreen(
-                    title: 'Quẹt mã lượt in',
-                    hint: 'Lần 1 = bắt đầu in · Lần 2 = in xong',
-                    continuous: true,
-                    onCode: (code) => scanBulkRun(ref, code),
-                  ),
-                ),
-              ),
+              onPressed: () => openBulkRunScanner(context, ref),
               icon: const Icon(Icons.qr_code_scanner_rounded),
               label: const Text('Quẹt mã lượt in'),
               style: FilledButton.styleFrom(

@@ -419,6 +419,10 @@ export default function Home() {
       if (activeTab === 'production') {
         if (/^\d+$/.test(code)) {
           window.dispatchEvent(new CustomEvent('productionNumericScanned', { detail: code }));
+        } else {
+          // Mã không phải barcode (VD tem máy in): tab Sản xuất SLL cần nó cho bước
+          // quẹt máy khi bắt đầu 1 lượt PEI.
+          window.dispatchEvent(new CustomEvent('productionCodeScanned', { detail: code }));
         }
         return;
       }
