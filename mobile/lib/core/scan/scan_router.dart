@@ -8,12 +8,9 @@ import '../../data/models/order.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/filament_repository.dart';
 import '../../data/repositories/production_repository.dart';
-import '../../features/bulk/bulk_scan.dart';
 import '../../features/production/print_item_sheet.dart';
+import '../../features/scanner/scan_result_sheet.dart';
 import '../../features/scanner/scanner_screen.dart';
-import '../api/api_client.dart';
-import '../routes.dart';
-import '../widgets/common.dart';
 import 'code_normalizer.dart';
 import 'scan_mode.dart';
 
@@ -50,6 +47,10 @@ final codeNormalizerProvider = Provider<CodeNormalizer>((ref) {
         order.id,
       ],
     },
+    bulkRunIds: {
+      for (final order in bulkOrders)
+        for (final run in order.runs) run.id,
+    },
     colorNames: spools.map((e) => e.filamentColorName).where((e) => e.isNotEmpty).toSet(),
   );
 });
@@ -63,11 +64,11 @@ class ScanFailure implements Exception {
   String toString() => message;
 }
 
-/// Điều phối mã vừa quét — mỗi loại tem mở đúng màn thông tin của nó.
+/// Điều phối mã vừa quét.
 ///
-/// | Tem quét | Mở ra |
+/// | Tem quét | Kết quả |
 /// |---|---|
-/// | Cuộn nhựa | Chi tiết cuộn (có nút cân ngay đầu màn) |
+/// | Cuộn nhựa | Mở chi tiết cuộn (có nút cân ngay đầu màn) |
 /// | Tem màu `CLR-` | Danh sách mọi cuộn cùng màu + tổng tồn |
 /// | Kho `LOC-` | Chi tiết kho + cuộn đang chứa |
 /// | Máy in `PRT-` | Chi tiết máy in + trạng thái realtime |
@@ -75,141 +76,89 @@ class ScanFailure implements Exception {
 /// | Mâm `PEI-<id>` | Chi tiết mâm + miếng in trên mâm |
 /// | Mã đơn hàng | Chi tiết đơn + tiến độ tem |
 /// | Mã đơn SLL `SLL-xxx` | Chi tiết đơn số lượng lớn + các lượt PEI |
-/// | Barcode 8 số | Bảng đổi trạng thái miếng in, hoặc check-in/out lượt SLL |
+/// | Barcode 8 số | Bảng đổi trạng thái miếng in, hoặc lượt in SLL |
 /// | Mã hàng hóa `SP-` | Chi tiết hàng hóa + nhập/xuất kho |
 ///
-/// Ngoại lệ duy nhất phá thứ tự này là **chế độ gán hàng loạt** (scanMode): khi
-/// đang bật, mã cuộn nhựa được xử lý ngay thành thao tác gán/tháo.
+/// **Quét ở màn toàn cục không tự ý làm gì.** Mọi loại mã đều dừng lại ở bảng
+/// [showScanResultSheet] để người quét đọc xem đó là mã gì rồi tự chọn việc —
+/// quét ở đây thường chỉ là "soi xem tem này là cái gì". Việc làm-ngay chỉ xảy ra
+/// khi quét từ trong màn nghiệp vụ tương ứng (Miếng in, Đơn SLL, Kiểm kho, Kiểm
+/// hàng, Cân) vì lúc đó chủ đích đã rõ.
+///
+/// Ngoại lệ duy nhất là **chế độ gán hàng loạt** (scanMode): người dùng đã bấm
+/// "gán cuộn" ở màn kho/máy in trước đó, nên mã cuộn quét tiếp được xử lý ngay để
+/// quét liên tiếp cho nhanh tay.
 class ScanRouter {
-  const ScanRouter(this._ref);
+  const ScanRouter(this._ref, {this.onOpen});
 
   final WidgetRef _ref;
 
-  /// Trả về thông báo để hiển thị (dùng cho chế độ quét liên tục), hoặc null nếu
-  /// đã điều hướng sang màn khác.
+  /// Nơi nhận đường dẫn cần mở. Màn quét toàn cục truyền vào để **mở sau khi màn
+  /// quét đã đóng** — push rồi pop ngay sau đó sẽ pop mất chính màn vừa mở.
+  final void Function(String route)? onOpen;
+
+  /// Trả về thông báo để hiển thị, hoặc null nếu không có gì để báo.
   Future<String?> handle(BuildContext context, String rawCode) async {
     final scanned = _ref.read(codeNormalizerProvider).classify(rawCode);
 
-    switch (scanned.kind) {
-      case ScanKind.command:
-        return _handleCommand(scanned.id!);
-
-      case ScanKind.spool:
-        return _handleSpool(context, scanned.id!);
-
-      case ScanKind.printerSlot:
-        final printers = _ref.read(printersProvider).valueOrNull ?? const [];
-        final printer = _firstWhereOrNull(printers, (p) => p.id == scanned.id);
-        _ref.read(scanModeProvider.notifier).start(
-              ScanMode(
-                target: ScanTarget.printer,
-                targetId: scanned.id!,
-                targetName: printer?.name ?? scanned.id!,
-                action: ScanAction.add,
-                slot: scanned.slot,
-              ),
-            );
-        return 'Đã bật chế độ gán cuộn vào Line ${scanned.slot}. Quét tiếp mã cuộn nhựa.';
-
-      case ScanKind.colorTag:
-        if (scanned.id == null) {
-          throw ScanFailure(
-            'Không có cuộn nhựa nào màu "${scanned.label ?? scanned.raw}".',
-          );
-        }
-        if (context.mounted) context.push(Routes.colorDetail(scanned.id!));
-        return null;
-
-      case ScanKind.location:
-        if (context.mounted) context.push(Routes.locationDetail(scanned.id!));
-        return null;
-
-      case ScanKind.printer:
-        if (context.mounted) context.push(Routes.printerDetail(scanned.id!));
-        return null;
-
-      case ScanKind.peiSheet:
-        if (context.mounted) context.push(Routes.peiSheetDetail(scanned.id!));
-        return null;
-
-      case ScanKind.order:
-        if (context.mounted) context.push(Routes.orderDetail(scanned.id!));
-        return null;
-
-      case ScanKind.bulkOrder:
-        if (context.mounted) context.push(Routes.bulkOrderDetail(scanned.id!));
-        return null;
-
-      case ScanKind.storeProduct:
-        final products = _ref.read(storeProvider).valueOrNull?.sanPham ?? const [];
-        final product = _firstWhereOrNull(
-          products,
-          (p) => p.maQR == scanned.id || p.id == scanned.id,
-        );
-        if (product != null && context.mounted) {
-          context.push(Routes.storeDetail(product.id));
-        }
-        return null;
-
-      case ScanKind.printItem:
-        return _handlePrintItem(context, scanned.id!);
-
-      case ScanKind.unknown:
-        throw ScanFailure(
-          'Không nhận ra mã "${scanned.raw}".\n'
-          'Kiểm tra xem dữ liệu đã tải xong chưa, hoặc tem này thuộc hệ thống khác.',
-        );
+    if (scanned.kind == ScanKind.unknown) {
+      throw ScanFailure(
+        'Không nhận ra mã "${scanned.raw}".\n'
+        'Kiểm tra xem dữ liệu đã tải xong chưa, hoặc tem này thuộc hệ thống khác.',
+      );
     }
+
+    // Tem màu quét ra màu không có trong DB thì chẳng mở được gì.
+    if (scanned.kind == ScanKind.colorTag && scanned.id == null) {
+      throw ScanFailure(
+        'Không có cuộn nhựa nào màu "${scanned.label ?? scanned.raw}".',
+      );
+    }
+
+    // Đang bật chế độ gán/tháo hàng loạt: mã cuộn xử lý ngay, không hỏi lại.
+    if (scanned.kind == ScanKind.spool) {
+      final mode = _ref.read(scanModeProvider);
+      if (mode != null) return _assignSpool(scanned.id!, mode);
+    }
+
+    // Bảng đổi trạng thái tem tự nó đã là bảng lựa chọn rồi.
+    if (scanned.kind == ScanKind.printItem) {
+      return _handlePrintItem(context, scanned.id!);
+    }
+
+    if (!context.mounted) return null;
+    return showScanResultSheet(context, _ref, scanned, onOpen: _open(context));
   }
 
-  Future<String?> _handleCommand(String command) async {
-    switch (command) {
-      case ScanCommands.inventoryReset:
-        await _ref.read(inventorySessionProvider.notifier).reset();
-        return 'Đã bắt đầu phiên kiểm kho mới.';
-      case ScanCommands.inventoryToggleAll:
-        return 'Lệnh này chỉ dùng trong màn Kiểm kho.';
-      case ScanCommands.weightTab:
-      case ScanCommands.weightDone:
-        return 'Lệnh này chỉ dùng trong màn Cân cuộn nhựa.';
-      default:
-        throw ScanFailure('Lệnh QR không hỗ trợ: $command');
-    }
-  }
+  void Function(String route) _open(BuildContext context) =>
+      onOpen ?? (route) => context.push(route);
 
-  /// Cuộn nhựa: đang bật scanMode thì gán/tháo, ngược lại mở màn thông tin cuộn.
-  Future<String?> _handleSpool(BuildContext context, String spoolId) async {
-    final mode = _ref.read(scanModeProvider);
+  /// Gán / tháo cuộn theo chế độ quét hàng loạt đang bật.
+  Future<String?> _assignSpool(String spoolId, ScanMode mode) async {
+    final repo = _ref.read(filamentRepositoryProvider);
+    final isAdd = mode.action == ScanAction.add;
 
-    if (mode != null) {
-      final repo = _ref.read(filamentRepositoryProvider);
-      final isAdd = mode.action == ScanAction.add;
-
-      if (mode.target == ScanTarget.location) {
-        await repo.updateSpool(
-          spoolId,
-          locationId: isAdd ? mode.targetId : null,
-          clearLocation: !isAdd,
-        );
-      } else {
-        await repo.updateSpool(
-          spoolId,
-          printerId: isAdd ? mode.targetId : null,
-          printerSlot: isAdd ? mode.slot : null,
-          clearPrinter: !isAdd,
-          clearSlot: !isAdd,
-        );
-      }
-
-      await refreshCoreData(_ref);
-
-      final verb = isAdd ? 'Đã gắn' : 'Đã tháo';
-      final preposition = isAdd ? 'vào' : 'khỏi';
-      return '$verb cuộn $spoolId $preposition ${mode.targetName}.';
+    if (mode.target == ScanTarget.location) {
+      await repo.updateSpool(
+        spoolId,
+        locationId: isAdd ? mode.targetId : null,
+        clearLocation: !isAdd,
+      );
+    } else {
+      await repo.updateSpool(
+        spoolId,
+        printerId: isAdd ? mode.targetId : null,
+        printerSlot: isAdd ? mode.slot : null,
+        clearPrinter: !isAdd,
+        clearSlot: !isAdd,
+      );
     }
 
-    if (context.mounted) context.push(Routes.spoolDetail(spoolId));
-    return null;
+    await refreshCoreData(_ref);
+
+    final verb = isAdd ? 'Đã gắn' : 'Đã tháo';
+    final preposition = isAdd ? 'vào' : 'khỏi';
+    return '$verb cuộn $spoolId $preposition ${mode.targetName}.';
   }
 
   /// Tem miếng in: mở bảng đổi trạng thái nhanh (pending → printing → completed).
@@ -228,30 +177,36 @@ class ScanRouter {
     return null;
   }
 
-  /// Lượt in SLL: quẹt lần 1 bấm giờ bắt đầu, lần 2 chốt in xong.
+  /// Mã 8 số không phải miếng in: có thể là lượt in SLL mà danh sách đơn trong
+  /// app chưa kịp có (vừa tạo ở máy khác). Tải lại rồi mở bảng lựa chọn — vẫn
+  /// **không** tự quẹt check-in/check-out hộ người dùng.
   Future<String?> _handleBulkRun(BuildContext context, String barcode) async {
-    final String message;
-    try {
-      message = await scanBulkRun(_ref, barcode);
-    } on ApiException catch (error) {
-      // 404 = mã không thuộc cả hai bảng; các lỗi khác (VD lượt đã in xong) là
-      // thông báo nghiệp vụ, giữ nguyên câu của backend.
-      if (error.statusCode == 404) {
-        throw ScanFailure('Không tìm thấy miếng in hay lượt in mã $barcode.');
-      }
-      throw ScanFailure(error.message);
+    await _ref.read(bulkOrdersProvider.notifier).refresh();
+
+    final orders = _ref.read(bulkOrdersProvider).valueOrNull ?? const <BulkOrder>[];
+    final found = orders.any((order) => order.runs.any((r) => r.id == barcode));
+    if (!found) {
+      throw ScanFailure('Không tìm thấy miếng in hay lượt in mã $barcode.');
     }
-    // Màn quét 1 lần sẽ pop ngay nên thông báo trả về bị bỏ qua — bắn thêm toast
-    // ở tầng ScaffoldMessenger để người quét vẫn thấy kết quả.
-    if (context.mounted) showToast(context, message);
-    return message;
+
+    if (!context.mounted) return null;
+    return showScanResultSheet(
+      context,
+      _ref,
+      ScannedCode(raw: barcode, kind: ScanKind.bulkRun, id: barcode),
+      onOpen: _open(context),
+    );
   }
 }
 
-/// Mở màn quét toàn cục (nút tròn giữa thanh điều hướng).
+/// Mở màn quét toàn cục (nút tròn giữa thanh điều hướng, menu nhanh, Trang chính).
+///
+/// Màn nào cần mở sau khi quét thì được ghi vào [pending] rồi mở ở đây — mở ngay
+/// lúc còn đứng trong màn quét sẽ bị chính cú `pop` của nó đóng lại.
 Future<void> openGlobalScanner(BuildContext context, WidgetRef ref) async {
   // Đang ở chế độ gán/tháo hàng loạt thì quét liên tục cho nhanh tay.
   final continuous = ref.read(scanModeProvider) != null;
+  String? pending;
 
   await Navigator.of(context, rootNavigator: true).push<void>(
     MaterialPageRoute(
@@ -261,16 +216,15 @@ Future<void> openGlobalScanner(BuildContext context, WidgetRef ref) async {
           hint: 'Cuộn nhựa · Tem màu · Kho · Máy in · Mâm PEI · Đơn hàng · '
               'Lượt in SLL · Hàng hóa',
           continuous: continuous,
-          onCode: (code) => ScanRouter(ref).handle(context, code),
+          onCode: (code) => ScanRouter(
+            ref,
+            onOpen: (route) => pending = route,
+          ).handle(context, code),
         ),
       ),
     ),
   );
-}
 
-T? _firstWhereOrNull<T>(Iterable<T> items, bool Function(T) test) {
-  for (final item in items) {
-    if (test(item)) return item;
-  }
-  return null;
+  final route = pending;
+  if (route != null && context.mounted) context.push(route);
 }

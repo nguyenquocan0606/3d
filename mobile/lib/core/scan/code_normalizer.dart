@@ -8,6 +8,7 @@ enum ScanKind {
   peiSheet,
   order,
   bulkOrder,
+  bulkRun,
   printItem,
   storeProduct,
   command,
@@ -82,6 +83,7 @@ class CodeNormalizer {
     this.peiSheetIds = const {},
     this.orderCodes = const {},
     this.bulkOrderCodes = const {},
+    this.bulkRunIds = const {},
     this.colorNames = const {},
   });
 
@@ -101,6 +103,10 @@ class CodeNormalizer {
 
   /// Mã đơn sản xuất số lượng lớn (`SLL-001`) và uuid đơn.
   final Set<String> bulkOrderCodes;
+
+  /// Mã vạch 8 số của các **lượt in SLL**. Cùng dạng với tem miếng in nhưng khác
+  /// bảng ở backend, nên phải biết trước để khỏi phải hỏi API mới phân biệt được.
+  final Set<String> bulkRunIds;
 
   /// Tên màu nhựa có thật trong DB, để khôi phục dấu từ tem `CLR-` đã bị bỏ dấu.
   final Set<String> colorNames;
@@ -179,10 +185,15 @@ class CodeNormalizer {
       return ScannedCode(raw: raw, kind: ScanKind.colorTag, label: scannedColor);
     }
 
-    // Tem miếng in luôn là barcode 8 chữ số — ưu tiên trước mã đơn hàng vì
-    // orderCode do người dùng tự đặt, có thể trùng dạng số.
+    // Tem miếng in và lượt in SLL đều là barcode 8 chữ số — ưu tiên trước mã đơn
+    // hàng vì orderCode do người dùng tự đặt, có thể trùng dạng số. Backend cấp
+    // mã cho hai bảng từ cùng một kho số nên không bao giờ trùng nhau.
     if (RegExp(r'^\d{8}$').hasMatch(raw)) {
-      return ScannedCode(raw: raw, kind: ScanKind.printItem, id: raw);
+      return ScannedCode(
+        raw: raw,
+        kind: bulkRunIds.contains(raw) ? ScanKind.bulkRun : ScanKind.printItem,
+        id: raw,
+      );
     }
 
     final order = _match(orderCodes, normalized);

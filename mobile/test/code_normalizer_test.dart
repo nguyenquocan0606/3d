@@ -69,8 +69,17 @@ void main() {
       expect(normalizer.classify(uuid).kind, ScanKind.peiSheet);
     });
 
-    test('barcode 8 số là miếng in', () {
+    test('barcode 8 số mặc định là miếng in', () {
       expect(normalizer.classify('48120593').kind, ScanKind.printItem);
+    });
+
+    test('barcode 8 số nằm trong danh sách lượt SLL thì là lượt in', () {
+      // Hai bảng dùng chung dạng mã 8 số; chỉ danh sách lượt đã tải mới phân biệt
+      // được, khỏi phải hỏi API.
+      const withRuns = CodeNormalizer(bulkRunIds: {'48120593'});
+      expect(withRuns.classify('48120593').kind, ScanKind.bulkRun);
+      expect(withRuns.classify('48120593').id, '48120593');
+      expect(withRuns.classify('99999999').kind, ScanKind.printItem);
     });
 
     test('mã đơn hàng', () {
