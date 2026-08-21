@@ -40,7 +40,15 @@ export type MayChup = {
 /**
  * Gọi mỗi lần quét, cho mỗi máy. **Không await** — chụp và gửi chạy nền để vòng giám sát đi tiếp.
  */
-export function ngoLop(may: MayChup, dangIn: boolean, lop: number | null, tenFile: string | null) {
+export type SoLieuLop = {
+  lop: number | null;
+  tongLop: number | null;
+  tienDo: number | null;
+  conLaiPhut: number | null;
+};
+
+export function ngoLop(may: MayChup, dangIn: boolean, so: SoLieuLop, tenFile: string | null) {
+  const lop = so.lop;
   if (!may.lanIp || !may.lanAccessCode || !dangIn || !lop || lop <= 0) {
     // In xong hoặc mất tín hiệu thì quên mốc cũ, để mâm sau bắt đầu lại từ đầu.
     if (!dangIn) boNho.delete(may.id);
@@ -58,10 +66,11 @@ export function ngoLop(may: MayChup, dangIn: boolean, lop: number | null, tenFil
   if (lop <= bo.lopCuoi || bo.dangChup) return;
   bo.lopCuoi = lop;
 
-  void chupVaGui(may, bo, lop, tenFile);
+  void chupVaGui(may, bo, so, tenFile);
 }
 
-async function chupVaGui(may: MayChup, bo: BoNho, lop: number, tenFile: string | null) {
+async function chupVaGui(may: MayChup, bo: BoNho, so: SoLieuLop, tenFile: string | null) {
+  const lop = so.lop ?? 0;
   bo.dangChup = true;
   try {
     const caiDat = await layCaiDat();
@@ -84,11 +93,21 @@ async function chupVaGui(may: MayChup, bo: BoNho, lop: number, tenFile: string |
     if (anh.length === 0) return;
 
     bo.guiLuc = Date.now();
+    const truong: Array<{ ten: string; giaTri: string }> = [
+      { ten: 'Lớp', giaTri: so.tongLop ? `${lop} / ${so.tongLop}` : `${lop}` },
+    ];
+    if (so.tienDo != null) truong.push({ ten: 'Tiến độ', giaTri: `${so.tienDo}%` });
+    if (so.conLaiPhut != null && so.conLaiPhut > 0) {
+      const g = Math.floor(so.conLaiPhut / 60);
+      truong.push({ ten: 'Còn lại', giaTri: g > 0 ? `${g}h ${so.conLaiPhut % 60}m` : `${so.conLaiPhut}m` });
+    }
+
     await guiDiscord({
       webhook: caiDat.discordWebhook,
       tieuDe: `${may.name} — xong lớp ${lop}`,
       noiDung: tenFile ?? undefined,
       mucDo: 'tin',
+      truong,
       anh,
     });
   } catch (e) {

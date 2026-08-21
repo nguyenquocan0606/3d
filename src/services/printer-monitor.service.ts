@@ -177,10 +177,18 @@ async function quetMotMay(printer: {
   const gon = gomTrangThai(hienTai);
 
   // Ảnh camera theo lớp đi đường riêng: chụp mất mấy giây nên chạy nền, không chặn vòng quét.
+  const pl = hienTai.extendedInfo?.payload ?? {};
   ngoLop(
     printer,
     gon === 'in',
-    (hienTai.extendedInfo?.payload?.layer_num as number | undefined) ?? null,
+    {
+      lop: (pl.layer_num as number | undefined) ?? null,
+      tongLop: (pl.total_layers as number | undefined) ?? null,
+      tienDo: Math.round(hienTai.progress || 0),
+      conLaiPhut: hienTai.remainingTimeSeconds
+        ? Math.round(hienTai.remainingTimeSeconds / 60)
+        : null,
+    },
     hienTai.fileName ?? null,
   );
 

@@ -106,6 +106,17 @@ export async function ghiVaGuiSuKien(suKien: SuKienMoi) {
     },
   });
 
+  // Discord là kênh sổ cái nên nhận cả số liệu; Zalo/app vẫn chỉ một dòng chữ như cũ.
+  const chiTiet: Array<{ ten: string; giaTri: string }> = [{ ten: 'Máy', giaTri: suKien.tenMay }];
+  if (suKien.tenFile) chiTiet.push({ ten: 'Bản in', giaTri: suKien.tenFile });
+  if (suKien.tienDo != null) chiTiet.push({ ten: 'Tiến độ', giaTri: `${suKien.tienDo}%` });
+  if (suKien.nhietVoi != null || suKien.nhietBan != null) {
+    chiTiet.push({
+      ten: 'Nhiệt',
+      giaTri: `vòi ${Math.round(suKien.nhietVoi ?? 0)}° · bàn ${Math.round(suKien.nhietBan ?? 0)}°`,
+    });
+  }
+
   const { daGui, loiGui } = await guiDi({
     loai: suKien.loai,
     mucDo,
@@ -116,6 +127,7 @@ export async function ghiVaGuiSuKien(suKien: SuKienMoi) {
       printerId: suKien.printerId,
       loai: suKien.loai,
     },
+    chiTiet,
   });
 
   return prisma.suKienMayIn.update({
@@ -134,6 +146,8 @@ export async function guiDi(input: {
   tieuDe: string;
   noiDung: string;
   duLieu?: Record<string, string>;
+  /** Số liệu kèm theo, chỉ Discord dùng — Zalo và app đẩy chỉ có chỗ cho một dòng chữ. */
+  chiTiet?: Array<{ ten: string; giaTri: string }>;
 }): Promise<{ daGui: boolean; loiGui: string | null }> {
   const loi: string[] = [];
   let daGui = false;
@@ -192,6 +206,7 @@ export async function guiDi(input: {
         tieuDe: input.tieuDe,
         noiDung: input.noiDung,
         mucDo: input.mucDo,
+        truong: input.chiTiet,
       });
       if (ok) daGui = true;
       else loi.push('Discord: không gửi được.');
