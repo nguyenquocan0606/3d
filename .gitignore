@@ -40,5 +40,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Tin nhắn Zalo: ảnh/file khách gửi (worker tải về, không commit)
-data/
+# Tin nhắn Zalo: ảnh/file khách gửi (worker tải về, không commit), token FCM, từ điển lỗi tải về.
+# PHẢI neo bằng dấu "/" đầu: không neo thì mẫu khớp MỌI thư mục tên `data` ở mọi độ sâu — đã từng
+# nuốt trọn `mobile/lib/data/` khiến 13 file của tầng dữ liệu Flutter không bao giờ được commit,
+# và CI báo "Target of URI doesn't exist" cho những file vẫn nằm sờ sờ trên máy.
+/data/
