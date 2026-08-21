@@ -25,6 +25,10 @@ class BulkOrdersScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    return BulkRunPdaScope(child: _buildScreen(context, ref));
+  }
+
+  Widget _buildScreen(BuildContext context, WidgetRef ref) {
     final orders = ref.watch(bulkOrdersProvider);
 
     return Scaffold(

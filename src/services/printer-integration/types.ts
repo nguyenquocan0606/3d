@@ -1,5 +1,6 @@
 export interface PrinterStatusData {
   status: 'idle' | 'printing' | 'offline' | 'maintenance' | 'error';
+  /** Nhiệt độ luôn là **số nguyên** — provider làm tròn tại nguồn, nơi hiển thị cứ thế mà dùng. */
   nozzleTemp: number;
   nozzleTargetTemp: number;
   bedTemp: number;

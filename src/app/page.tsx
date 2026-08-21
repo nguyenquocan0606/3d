@@ -7,14 +7,14 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Cloud,
   Database,
   Archive,
   Edit2,
+  FlaskConical,
   FolderOpen,
   LayoutDashboard,
-  Link2,
   ListOrdered,
+  MessageSquare,
   PackageOpen,
   PackageSearch,
   Palette,
@@ -26,14 +26,16 @@ import {
   Search,
   Settings,
   ShoppingBag,
+  ShoppingCart,
   Store,
   Tag,
   Trash2,
+  Video,
   X,
 } from 'lucide-react';
-import { CloudLoginModal } from '@/components/Filament/cloud-login-modal';
-import { PairPrinterModal } from '@/components/Filament/pair-printer-modal';
+import { colorCodeFor, colorKey, findColorByCode, isColorCode, scannedColorKey } from '@/utils/color-code';
 import { CloudPrinterCard } from '@/components/Printer/CloudPrinterCard';
+import { TuongCamera } from '@/components/Printer/tuong-camera';
 import AddSpoolModal from '@/components/Filament/add-spool-modal';
 import UpdateWeightModal from '@/components/Filament/update-weight-modal';
 import EditSpoolModal from '@/components/Filament/edit-spool-modal';
@@ -43,6 +45,7 @@ import ManageLocationModal from '@/components/Filament/manage-location-modal';
 import AddPrinterModal from '@/components/Filament/add-printer-modal';
 import ManagePrinterModal from '@/components/Filament/manage-printer-modal';
 import ColorDetailModal from '@/components/Filament/color-detail-modal';
+import EshopPickModal from '@/components/Eshop/eshop-pick-modal';
 import PrintQrTab from '@/components/Filament/print-qr-tab';
 import PrintLabelTab from '@/components/Filament/print-label-tab';
 import CreateJobTab from '@/components/Filament/create-job-tab';
@@ -50,9 +53,11 @@ import CheckInventoryTab from '@/components/Filament/check-inventory-tab';
 import DashboardTab from '@/components/Dashboard/dashboard-tab';
 import ProductionTab from '@/components/Orders/production-tab';
 import MisaSettingsTab from '@/components/Settings/misa-settings-tab';
+import EshopTab from '@/components/Eshop/eshop-tab';
+import ZaloTab from '@/components/Zalo/zalo-tab';
 import ScaleCalibrationModal from '@/components/Filament/scale-calibration-modal';
 import { useScale } from '@/components/scale-provider';
-import { DashboardStats, Filament, FilamentWithSpools, Printer as PrinterType, Spool } from '@/types/filament.types';
+import { Filament, FilamentWithSpools, Printer as PrinterType, Spool } from '@/types/filament.types';
 
 type TabKey =
   | 'dashboard'
@@ -60,7 +65,11 @@ type TabKey =
   | 'filaments'
   | 'locations'
   | 'printers'
+  | 'cameras'
   | 'production'
+  | 'eshop'
+  | 'eshop-api-test' // liên kết ra /eshop-api-test
+  | 'zalo'
   | 'print-qr'
   | 'print-label'
   | 'create-job'
@@ -124,7 +133,12 @@ const navigation: Array<{ key: TabKey; label: string; icon: React.ElementType; h
   { key: 'filaments', label: 'Loại nhựa', icon: Palette },
   { key: 'locations', label: 'Kho lưu trữ', icon: FolderOpen },
   { key: 'printers', label: 'Máy in', icon: Printer },
+  { key: 'cameras', label: 'Camera', icon: Video },
   { key: 'production', label: 'Sản xuất', icon: ShoppingBag },
+  { key: 'eshop', label: 'eShop', icon: ShoppingCart },
+  // Công cụ kỹ thuật, có URL riêng (/eshop-api-test) — bắn thử API Open Platform bằng App ID/App Key.
+  { key: 'eshop-api-test', label: 'eShop API test', icon: FlaskConical, href: '/eshop-api-test' },
+  { key: 'zalo', label: 'Tin nhắn Zalo', icon: MessageSquare },
   // Có URL riêng (/hang-hoa-cua-hang) — chuyển trang thật thay vì chỉ đổi tab nội bộ.
   { key: 'store-products', label: 'Hàng hóa cửa hàng', icon: Store, href: '/hang-hoa-cua-hang' },
   { key: 'print-qr', label: 'In QR', icon: QrCode },
@@ -139,7 +153,6 @@ export default function Home() {
   const { weight: liveWeight, rawWeight, offset: scaleOffset, setOffset: setScaleOffset, isConnected: isScaleConnected } = useScale();
 
   const [filaments, setFilaments] = useState<FilamentWithSpools[]>([]);
-  const [stats, setStats] = useState<DashboardStats | null>(null);
   const [locations, setLocations] = useState<LocationItem[]>([]);
   const [printers, setPrinters] = useState<PrinterItem[]>([]);
   const [liveStatuses, setLiveStatuses] = useState<Record<string, unknown>>({});
@@ -166,9 +179,13 @@ export default function Home() {
   const [isManageLocationOpen, setIsManageLocationOpen] = useState(false);
   const [isAddPrinterOpen, setIsAddPrinterOpen] = useState(false);
   const [isManagePrinterOpen, setIsManagePrinterOpen] = useState(false);
-  const [isCloudLoginOpen, setIsCloudLoginOpen] = useState(false);
-  const [isPairPrinterOpen, setIsPairPrinterOpen] = useState(false);
   const [isColorDetailOpen, setIsColorDetailOpen] = useState(false);
+
+  const [eshopPickingOrder, setEshopPickingOrder] = useState<any>(null);
+  const eshopPickingOrderRef = useRef<any>(null);
+  useEffect(() => {
+    eshopPickingOrderRef.current = eshopPickingOrder;
+  }, [eshopPickingOrder]);
   const [isScaleCalibrationOpen, setIsScaleCalibrationOpen] = useState(false);
 
   const [selectedFilamentForSpool, setSelectedFilamentForSpool] = useState<Filament | null>(null);
@@ -217,23 +234,32 @@ export default function Home() {
     return ['ALL', ...Array.from(new Set(filaments.map((item) => item.type))).sort()];
   }, [filaments]);
 
+  // Gõ/quét thẳng mã tem màu (`CLR-...`) vào ô tìm kiếm thì lọc theo tên màu,
+  // bất kể tem ghi dấu cách hay gạch nối giữa các chữ.
+  const colorQueryKey = useMemo(
+    () => (isColorCode(searchQuery) ? scannedColorKey(searchQuery) : ''),
+    [searchQuery],
+  );
+
   const filteredFilaments = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return filaments.filter((filament) => {
       const matchesMaterial = materialFilter === 'ALL' || filament.type === materialFilter;
+      if (colorQueryKey) return matchesMaterial && colorKey(filament.colorName) === colorQueryKey;
       const text = [filament.type, filament.colorName, filament.brand, ...filament.spools.map((spool) => spool.id)].join(' ').toLowerCase();
       return matchesMaterial && (!query || text.includes(query));
     });
-  }, [filaments, materialFilter, searchQuery]);
+  }, [filaments, materialFilter, searchQuery, colorQueryKey]);
 
   const filteredSpools = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return allSpools.filter((spool) => {
       const matchesMaterial = materialFilter === 'ALL' || spool.filamentType === materialFilter;
+      if (colorQueryKey) return matchesMaterial && colorKey(spool.filamentColorName) === colorQueryKey;
       const text = [spool.id, spool.filamentType, spool.filamentColorName, spool.filamentBrand, spool.status].join(' ').toLowerCase();
       return matchesMaterial && (!query || text.includes(query));
     });
-  }, [allSpools, materialFilter, searchQuery]);
+  }, [allSpools, materialFilter, searchQuery, colorQueryKey]);
 
   const fetchData = useCallback(async (silent = false) => {
     if (!silent) {
@@ -242,22 +268,21 @@ export default function Home() {
     }
 
     try {
-      const [filamentRes, statsRes, locationRes, printerRes] = await Promise.all([
+      // Tab Tổng quan tự gọi /api/dashboard/* của riêng nó, nên ở đây không tải
+      // /api/dashboard/stats nữa — endpoint cũ giữ lại chỉ để app Flutter còn dùng.
+      const [filamentRes, locationRes, printerRes] = await Promise.all([
         fetch('/api/filaments'),
-        fetch('/api/dashboard/stats'),
         fetch('/api/locations'),
         fetch('/api/printers'),
       ]);
 
-      const [filamentData, statsData, locationData, printerData] = (await Promise.all([
+      const [filamentData, locationData, printerData] = (await Promise.all([
         filamentRes.json(),
-        statsRes.json(),
         locationRes.json(),
         printerRes.json(),
-      ])) as [ApiResponse<FilamentWithSpools[]>, ApiResponse<DashboardStats>, ApiResponse<LocationItem[]>, ApiResponse<PrinterItem[]>];
+      ])) as [ApiResponse<FilamentWithSpools[]>, ApiResponse<LocationItem[]>, ApiResponse<PrinterItem[]>];
 
       if (filamentData.status === 'success') setFilaments(filamentData.data || []);
-      if (statsData.status === 'success') setStats(statsData.data || null);
       if (locationData.status === 'success') setLocations(locationData.data || []);
       if (printerData.status === 'success') setPrinters(printerData.data || []);
 
@@ -370,7 +395,7 @@ export default function Home() {
 
   const openPrintForColor = (colorName: string) => {
     setSelectedSpoolForPrint({
-      id: `CLR-${colorName.toUpperCase().replace(/\s+/g, '-')}`,
+      id: colorCodeFor(colorName),
       filamentId: '',
       initialWeightG: 0,
       emptySpoolWeightG: 0,
@@ -383,6 +408,48 @@ export default function Home() {
     } as EnrichedSpool);
     setAutoPrintSpool(false);
     setIsPrintBarcodeOpen(true);
+  };
+
+  // In hàng loạt tem mã màu (CLR-) cho toàn bộ màu đang hiển thị trong tab Loại nhựa
+  const printAllColorLabels = () => {
+    const uniqueColors = Array.from(
+      new Map(filteredFilaments.map((f) => [f.colorName.toUpperCase(), f.colorName])).values(),
+    ).sort((a, b) => a.localeCompare(b, 'vi'));
+
+    if (uniqueColors.length === 0) {
+      showToast('Không có mã màu nào để in.', 'error');
+      return;
+    }
+
+    requestConfirm(
+      'In tất cả mã màu',
+      `Gửi lệnh in ${uniqueColors.length} tem mã màu (CLR-...)?`,
+      async () => {
+        let ok = 0;
+        for (const colorName of uniqueColors) {
+          const qrCode = colorCodeFor(colorName);
+          try {
+            const res = await fetch('/api/print-jobs', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                qrCode,
+                label: JSON.stringify({ line1: qrCode, line2: 'MÃ MÀU NHỰA', line3: colorName }),
+              }),
+            });
+            const data = await res.json();
+            if (data.status === 'success') ok += 1;
+          } catch {
+            // bỏ qua, báo tổng kết ở cuối
+          }
+        }
+        if (ok === uniqueColors.length) {
+          showToast(`Đã gửi lệnh in ${ok} tem mã màu.`);
+        } else {
+          showToast(`Chỉ gửi được ${ok}/${uniqueColors.length} tem mã màu.`, 'error');
+        }
+      },
+    );
   };
 
   const updateSpoolBinding = useCallback(async (spool: EnrichedSpool, binding: { locationId?: string | null; printerId?: string | null; printerSlot?: number | null }, successMessage: string) => {
@@ -435,6 +502,24 @@ export default function Home() {
       const location = locations.find((item) => item.id.replace(/-/g, '').toUpperCase() === normalized);
       let printer = printers.find((item) => item.id.replace(/-/g, '').toUpperCase() === normalized);
       const spool = allSpools.find((item) => item.id.replace(/-/g, '').toUpperCase() === normalized);
+
+      if (isColorCode(code)) {
+        // So bằng khóa chuẩn hóa: tem cũ có thể ghi "CLR-FOREST GREEN",
+        // "CLR-FOREST-GREEN" hay "CLRFORESTGREEN" — tất cả đều là một màu.
+        const colorFilament = findColorByCode(filaments, code, (f) => f.colorName);
+        if (colorFilament) {
+          setSelectedColorName(colorFilament.colorName);
+          setSelectedColorHex(colorFilament.colorHex || '#4f46e5');
+          setIsColorDetailOpen(true);
+          return;
+        }
+      }
+
+      // 4. Eshop picking overlay
+      if (eshopPickingOrderRef.current) {
+        // modal is open, let modal use globalScannedCode
+        return;
+      }
 
       let scannedSlot: number | null = null;
       if (!printer && !location && !spool) {
@@ -502,9 +587,21 @@ export default function Home() {
         return;
       }
 
-      setScanPopup({ type: 'unknown', title: 'Không tìm thấy mã', subtitle: code });
+      // Thử tìm Eshop Order
+      fetch(`/api/eshop/orders/scan?code=${encodeURIComponent(code)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.status === 'success' && data.data) {
+            setEshopPickingOrder(data.data);
+          } else {
+            setScanPopup({ type: 'unknown', title: 'Không tìm thấy mã', subtitle: code });
+          }
+        })
+        .catch(() => {
+          setScanPopup({ type: 'unknown', title: 'Không tìm thấy mã', subtitle: code });
+        });
     },
-    [activeTab, allSpools, locations, printers, scanMode, updateSpoolBinding],
+    [activeTab, allSpools, filaments, locations, printers, scanMode, updateSpoolBinding],
   );
 
   useEffect(() => {
@@ -707,12 +804,15 @@ export default function Home() {
             <div className="flex min-h-96 items-center justify-center text-slate-500">Đang tải dữ liệu...</div>
           ) : (
             <>
-              {activeTab === 'dashboard' && <DashboardTab stats={stats} />}
+              {activeTab === 'dashboard' && (
+                <DashboardTab setActiveTab={(tab) => setActiveTab(tab as TabKey)} />
+              )}
               {activeTab === 'filaments' && (
                 <FilamentsView
                   filaments={filteredFilaments}
                   onAddSpool={(filament) => openAddSpool(filament)}
                   onDelete={handleDeleteFilament}
+                  onPrintAllColors={printAllColorLabels}
                   onOpenColor={(colorName, colorHex) => {
                     setSelectedColorName(colorName);
                     setSelectedColorHex(colorHex || '#4f46e5');
@@ -755,8 +855,6 @@ export default function Home() {
                   printers={printers}
                   liveStatuses={liveStatuses}
                   onAdd={() => setIsAddPrinterOpen(true)}
-                  onCloud={() => setIsCloudLoginOpen(true)}
-                  onPair={() => setIsPairPrinterOpen(true)}
                   onManage={(printer) => {
                     setSelectedPrinterForManage(printer);
                     setIsManagePrinterOpen(true);
@@ -764,7 +862,10 @@ export default function Home() {
                   onPrint={openPrintForPrinter}
                 />
               )}
+              {activeTab === 'cameras' && <TuongCamera printers={printers} />}
               {activeTab === 'production' && <ProductionTab />}
+              {activeTab === 'eshop' && <EshopTab />}
+              {activeTab === 'zalo' && <ZaloTab />}
               {activeTab === 'print-qr' && (
                 <PrintQrTab allSpools={allSpools} locations={locations} printers={printers} filaments={filaments} globalScannedCode={globalScannedCode} />
               )}
@@ -940,28 +1041,6 @@ export default function Home() {
         }}
         onOpenPrintQR={openPrintForPrinter}
       />
-      {isCloudLoginOpen && (
-        <CloudLoginModal
-          onClose={() => setIsCloudLoginOpen(false)}
-          onSuccess={() => {
-            setIsCloudLoginOpen(false);
-            showToast('Đã kết nối cloud.');
-            fetchData(true);
-          }}
-          localPrinters={printers}
-        />
-      )}
-      {isPairPrinterOpen && (
-        <PairPrinterModal
-          onClose={() => setIsPairPrinterOpen(false)}
-          onSuccess={() => {
-            setIsPairPrinterOpen(false);
-            showToast('Đã ghép nối máy in.');
-            fetchData(true);
-          }}
-          localPrinters={printers}
-        />
-      )}
       <ColorDetailModal
         isOpen={isColorDetailOpen}
         onClose={() => setIsColorDetailOpen(false)}
@@ -969,6 +1048,10 @@ export default function Home() {
         colorHex={selectedColorHex}
         spools={allSpools.filter((spool) => spool.filamentColorName === selectedColorName)}
         onPrintQR={openPrintForColor}
+        onColorUpdated={(newHex: string) => {
+          setSelectedColorHex(newHex);
+          fetchData(true);
+        }}
       />
       <ScaleCalibrationModal
         isOpen={isScaleCalibrationOpen}
@@ -980,8 +1063,58 @@ export default function Home() {
           showToast('Đã lưu hiệu chuẩn cân.');
         }}
       />
+      <EshopPickModal
+        isOpen={!!eshopPickingOrder}
+        onClose={() => setEshopPickingOrder(null)}
+        order={eshopPickingOrder}
+        scannedData={globalScannedCode}
+      />
     </main>
   );
+}
+
+function getHueSortScore(hex: string | null) {
+  if (!hex) return 2000;
+  const cleanHex = hex.startsWith('#') ? hex : '#' + hex;
+  let r = 0, g = 0, b = 0;
+  if (cleanHex.length === 4) {
+    r = parseInt(cleanHex[1] + cleanHex[1], 16);
+    g = parseInt(cleanHex[2] + cleanHex[2], 16);
+    b = parseInt(cleanHex[3] + cleanHex[3], 16);
+  } else if (cleanHex.length === 7) {
+    r = parseInt(cleanHex.substring(1, 3), 16);
+    g = parseInt(cleanHex.substring(3, 5), 16);
+    b = parseInt(cleanHex.substring(5, 7), 16);
+  } else {
+    return 2000;
+  }
+  r /= 255;
+  g /= 255;
+  b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0, l = (max + min) / 2;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      case b: h = (r - g) / d + 4; break;
+    }
+    h /= 6;
+  }
+  
+  const hDeg = h * 360;
+  const sPct = s * 100;
+  const lPct = l * 100;
+  
+  // Grayscale colors (white, gray, black) put at the end, sorted by lightness
+  if (sPct < 15 || lPct < 15 || lPct > 90) {
+    return 1000 + (100 - lPct); 
+  }
+  
+  return hDeg;
 }
 
 function FilamentsView({
@@ -989,46 +1122,155 @@ function FilamentsView({
   onAddSpool,
   onDelete,
   onOpenColor,
+  onPrintAllColors,
 }: {
   filaments: FilamentWithSpools[];
   onAddSpool: (filament: Filament) => void;
   onDelete: (id: string, name: string) => void;
   onOpenColor: (colorName: string, colorHex?: string | null) => void;
+  onPrintAllColors: () => void;
 }) {
+  const [viewMode, setViewMode] = useState<'grid' | 'compact'>('grid');
+
+  const sortedFilaments = useMemo(() => {
+    return [...filaments].sort((a, b) => {
+      return getHueSortScore(a.colorHex) - getHueSortScore(b.colorHex);
+    });
+  }, [filaments]);
+
+  const colorCount = new Set(sortedFilaments.map((f) => f.colorName.toUpperCase())).size;
+  
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-      {filaments.map((filament) => {
-        const totalRemaining = filament.spools.reduce((sum, spool) => sum + spool.remainingWeightG, 0);
-        return (
-          <div key={filament.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-[#111827]">
-            <div className="flex items-start justify-between gap-3">
-              <button type="button" onClick={() => onOpenColor(filament.colorName, filament.colorHex)} className="flex min-w-0 items-center gap-3 text-left">
-                <span className="size-10 shrink-0 rounded-xl border border-slate-300" style={{ backgroundColor: filament.colorHex || '#4f46e5' }} />
-                <span className="min-w-0">
-                  <span className="block truncate font-bold">{filament.brand || 'No brand'} {filament.type}</span>
-                  <span className="block truncate text-sm text-slate-500">{filament.colorName}</span>
-                </span>
-              </button>
-              <button type="button" onClick={() => onDelete(filament.id, filament.colorName)} className="rounded-lg p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40">
-                <Trash2 size={16} />
-              </button>
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-              <InfoBox label="Số cuộn" value={`${filament.spools.length}`} />
-              <InfoBox label="Còn lại" value={`${totalRemaining.toLocaleString('vi-VN')}g`} />
-            </div>
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+          {sortedFilaments.length} loại nhựa — {colorCount} mã màu
+        </p>
+        <div className="flex items-center gap-3">
+          <div className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
             <button
               type="button"
-              onClick={() => onAddSpool(filament)}
-              className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 text-sm font-semibold text-white hover:bg-indigo-700"
+              onClick={() => setViewMode('grid')}
+              className={`h-full rounded-md px-3 text-xs font-semibold transition-colors ${
+                viewMode === 'grid'
+                  ? 'bg-indigo-600 text-white'
+                  : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+              }`}
             >
-              <Plus size={16} />
-              Thêm cuộn màu này
+              Thẻ Lớn
             </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('compact')}
+              className={`h-full rounded-md px-3 text-xs font-semibold transition-colors ${
+                viewMode === 'compact'
+                  ? 'bg-indigo-600 text-white'
+                  : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+              }`}
+            >
+              Thẻ Nhỏ
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={onPrintAllColors}
+            disabled={colorCount === 0}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            title="Gửi lệnh in tem CLR- cho tất cả mã màu đang hiển thị"
+          >
+            <Printer size={16} />
+            In tất cả
+          </button>
+        </div>
+      </div>
+      
+      <div className={viewMode === 'grid' ? "grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5"}>
+      {sortedFilaments.map((filament) => {
+        const totalRemaining = filament.spools.reduce((sum, spool) => sum + spool.remainingWeightG, 0);
+        
+        if (viewMode === 'compact') {
+          return (
+            <div key={filament.id} className="group flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition-all hover:shadow-md dark:border-slate-800 dark:bg-[#111827] dark:hover:border-slate-700">
+              <button type="button" onClick={() => onOpenColor(filament.colorName, filament.colorHex)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                <span className="size-12 shrink-0 rounded-full border border-slate-200 shadow-inner dark:border-slate-700" style={{ backgroundColor: filament.colorHex || '#4f46e5' }} />
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-bold">{filament.colorName}</span>
+                  <span className="block truncate text-xs text-slate-500">{filament.brand || 'No brand'} {filament.type}</span>
+                  <span className="mt-0.5 block text-xs font-semibold text-indigo-600 dark:text-indigo-400">{filament.spools.length} cuộn — {totalRemaining.toLocaleString('vi-VN')}g</span>
+                </span>
+              </button>
+              <div className="flex flex-col gap-2">
+                <button type="button" onClick={() => onAddSpool(filament)} className="rounded-lg bg-indigo-50 p-2 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-400 dark:hover:bg-indigo-900/50">
+                  <Plus size={14} />
+                </button>
+                <button type="button" onClick={() => onDelete(filament.id, filament.colorName)} className="rounded-lg p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div key={filament.id} className="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg dark:border-slate-800 dark:bg-[#111827] dark:hover:border-slate-700">
+            {/* Header màu (Paint swatch style) */}
+            <div 
+              className="h-24 w-full cursor-pointer transition-transform group-hover:scale-105" 
+              style={{ backgroundColor: filament.colorHex || '#4f46e5' }}
+              onClick={() => onOpenColor(filament.colorName, filament.colorHex)}
+            >
+              <div className="h-full w-full bg-gradient-to-b from-white/10 to-black/10" />
+            </div>
+            
+            <div className="relative flex-1 p-5">
+              <button 
+                type="button" 
+                onClick={() => onDelete(filament.id, filament.colorName)} 
+                className="absolute right-4 top-[-20px] flex size-10 items-center justify-center rounded-full bg-white text-red-500 shadow-md transition-transform hover:scale-110 hover:bg-red-50 dark:bg-slate-800 dark:hover:bg-slate-700"
+                title="Xóa loại nhựa"
+              >
+                <Trash2 size={18} />
+              </button>
+
+              <div className="mb-4 pr-6">
+                <h3 className="line-clamp-1 text-lg font-bold text-slate-800 dark:text-slate-100" title={filament.colorName}>{filament.colorName}</h3>
+                <p className="line-clamp-1 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{filament.brand || 'No brand'} • {filament.type}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-xl bg-slate-50 p-3 text-center dark:bg-slate-800/50">
+                  <p className="text-[10px] font-semibold uppercase text-slate-500 dark:text-slate-400">Số cuộn</p>
+                  <p className="mt-1 text-xl font-bold text-slate-700 dark:text-slate-200">{filament.spools.length}</p>
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3 text-center dark:bg-slate-800/50">
+                  <p className="text-[10px] font-semibold uppercase text-slate-500 dark:text-slate-400">Khối lượng</p>
+                  <p className="mt-1 text-lg font-bold text-indigo-600 dark:text-indigo-400">{totalRemaining >= 1000 ? (totalRemaining / 1000).toFixed(1) + 'kg' : totalRemaining + 'g'}</p>
+                </div>
+              </div>
+
+              <div className="mt-5 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => onOpenColor(filament.colorName, filament.colorHex)}
+                  className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-xs font-bold uppercase tracking-wider text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                >
+                  Chi tiết
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onAddSpool(filament)}
+                  className="flex flex-[1.5] items-center justify-center gap-2 rounded-xl bg-indigo-600 py-2.5 text-xs font-bold uppercase tracking-wider text-white transition-colors hover:bg-indigo-700"
+                >
+                  <Plus size={16} />
+                  Nhập kho
+                </button>
+              </div>
+            </div>
           </div>
         );
       })}
-      {filaments.length === 0 && <EmptyState text="Chưa có loại nhựa phù hợp." />}
+        {sortedFilaments.length === 0 && <div className="col-span-full"><EmptyState text="Chưa có loại nhựa phù hợp." /></div>}
+      </div>
     </div>
   );
 }
@@ -1175,16 +1417,12 @@ function PrintersView({
   printers,
   liveStatuses,
   onAdd,
-  onCloud,
-  onPair,
   onManage,
   onPrint,
 }: {
   printers: PrinterItem[];
   liveStatuses: Record<string, unknown>;
   onAdd: () => void;
-  onCloud: () => void;
-  onPair: () => void;
   onManage: (printer: PrinterItem) => void;
   onPrint: (printer: PrinterItem) => void;
 }) {
@@ -1205,14 +1443,6 @@ function PrintersView({
           <button type="button" onClick={onAdd} className="inline-flex h-10 items-center gap-2 rounded-lg bg-indigo-600 px-3 text-sm font-semibold text-white">
             <Plus size={16} />
             Thêm máy in
-          </button>
-          <button type="button" onClick={onCloud} className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-semibold dark:border-slate-700">
-            <Cloud size={16} />
-            Kết nối cloud
-          </button>
-          <button type="button" onClick={onPair} className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-semibold dark:border-slate-700">
-            <Link2 size={16} />
-            Pair máy in
           </button>
         </div>
         <div className="inline-flex w-fit rounded-lg border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">

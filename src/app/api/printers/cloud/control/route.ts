@@ -34,7 +34,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ status: 'error', message: `Gửi lệnh ${action} thất bại` }, { status: 500 });
     }
 
-  } catch (error: any) {
+  } catch (error) {
     console.error('[API Cloud Control] Error:', error);
     return NextResponse.json({ status: 'error', message: 'Lỗi server' }, { status: 500 });
   }

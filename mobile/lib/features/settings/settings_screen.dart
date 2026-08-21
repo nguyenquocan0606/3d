@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/config/app_settings.dart';
+import '../../core/format/formatters.dart';
+import '../../core/notify/push_service.dart';
+import '../../core/routes.dart';
 import '../../core/scale/scale_service.dart';
+import '../../core/scan/pda_scan.dart';
+import '../../core/scan/scan_input_mode.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../../data/providers.dart';
@@ -26,6 +32,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late final _mqttUrl = TextEditingController(text: _initial.mqttUrl);
   late final _scaleTopic = TextEditingController(text: _initial.scaleTopic);
   late final _apiKey = TextEditingController(text: _initial.apiKey);
+  late final _tenThietBi = TextEditingController(text: _initial.tenThietBi);
 
   bool _testing = false;
   String? _testResult;
@@ -37,6 +44,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _mqttUrl.dispose();
     _scaleTopic.dispose();
     _apiKey.dispose();
+    _tenThietBi.dispose();
     super.dispose();
   }
 
@@ -54,6 +62,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ref.invalidate(ordersProvider);
     ref.invalidate(storeProvider);
     await ref.read(scaleProvider.notifier).reconnect();
+
+    // Tên máy nằm trong danh sách thiết bị nhận thông báo trên web — đổi tên phải báo lại máy chủ,
+    // không thì web vẫn hiện tên cũ.
+    await ref.read(appSettingsProvider.notifier).setTenThietBi(_tenThietBi.text);
+    await ref.read(pushServiceProvider).dongBoDangKy();
 
     if (mounted) showToast(context, 'Đã lưu cấu hình.');
   }
@@ -96,6 +109,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Nuốt mã quét ngay tại màn này: đang thử máy mà mã lọt xuống bộ điều phối
+    // chung thì cứ mỗi lần bóp cò lại bật lên một bảng kết quả che mất ô thử.
+    return PdaScanScope(
+      showFeedback: false,
+      onCode: (_) async => null,
+      child: _buildScreen(context),
+    );
+  }
+
+  Widget _buildScreen(BuildContext context) {
     final settings = ref.watch(appSettingsProvider);
     final scale = ref.watch(scaleProvider);
 
@@ -191,10 +214,112 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ],
           const SizedBox(height: 26),
+          const Text('Chế độ quét', style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          const Text(
+            'Cấu hình riêng của máy này, không ảnh hưởng máy khác trong xưởng.',
+            style: TextStyle(fontSize: 12.5, color: AppColors.muted),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<ScanInputMode>(
+              segments: [
+                for (final mode in ScanInputMode.values)
+                  ButtonSegment<ScanInputMode>(
+                    value: mode,
+                    label: Text(mode.label),
+                    icon: Icon(
+                      mode == ScanInputMode.camera
+                          ? Icons.photo_camera_rounded
+                          : Icons.qr_code_scanner_rounded,
+                    ),
+                  ),
+              ],
+              selected: {settings.scanInputMode},
+              showSelectedIcon: false,
+              onSelectionChanged: (value) => ref
+                  .read(appSettingsProvider.notifier)
+                  .setScanInputMode(value.first),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            settings.scanInputMode.description,
+            style: const TextStyle(
+              fontSize: 12.5,
+              color: AppColors.muted,
+              height: 1.5,
+            ),
+          ),
+          if (settings.scanInputMode == ScanInputMode.pda) ...[
+            const SizedBox(height: 12),
+            const _PdaScanTestCard(),
+          ],
+          const SizedBox(height: 26),
+          const Text('Thông báo máy in', style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 10),
+          SectionCard(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: settings.thongBaoBat,
+              title: const Text('Nhận thông báo hoạt động máy in'),
+              subtitle: Text(
+                settings.thongBaoBat
+                    ? 'Máy chủ sẽ đẩy thông báo khi máy in bắt đầu, in xong, báo lỗi hoặc mất kết nối.'
+                    : 'Đã tắt — máy này không nhận thông báo nào.',
+                style: const TextStyle(fontSize: 12),
+              ),
+              onChanged: (bat) async {
+                await ref.read(appSettingsProvider.notifier).setThongBaoBat(bat);
+                await ref.read(pushServiceProvider).dongBoDangKy();
+              },
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _tenThietBi,
+            enabled: settings.thongBaoBat,
+            decoration: const InputDecoration(
+              labelText: 'Tên máy này',
+              helperText: 'Hiện trên web để biết máy nào đang nhận (VD: PDA kho 1)',
+              prefixIcon: Icon(Icons.smartphone_rounded),
+            ),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: () => context.push(Routes.printerEvents),
+            icon: const Icon(Icons.history_rounded),
+            label: const Text('Xem nhật ký hoạt động máy in'),
+          ),
+          const SizedBox(height: 26),
           const Text('Trạm cân MQTT', style: TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 10),
+          SectionCard(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: settings.scaleEnabled,
+              title: const Text('Dùng trạm cân'),
+              subtitle: Text(
+                settings.scaleEnabled
+                    ? 'Đang giữ kết nối tới broker để nhận số cân.'
+                    : 'Đã tắt — máy không nối broker, đỡ tốn pin. Máy PDA ngoài '
+                        'kho nên để tắt.',
+                style: const TextStyle(fontSize: 12),
+              ),
+              onChanged: (bat) async {
+                await ref.read(appSettingsProvider.notifier).setScaleEnabled(bat);
+                // Bật thì nối ngay, tắt thì `_connect` tự đóng socket.
+                await ref.read(scaleProvider.notifier).reconnect();
+              },
+            ),
+          ),
+          const SizedBox(height: 12),
           TextField(
             controller: _mqttUrl,
+            enabled: settings.scaleEnabled,
             keyboardType: TextInputType.url,
             autocorrect: false,
             decoration: InputDecoration(
@@ -206,6 +331,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           const SizedBox(height: 12),
           TextField(
             controller: _scaleTopic,
+            enabled: settings.scaleEnabled,
             autocorrect: false,
             decoration: const InputDecoration(
               labelText: 'Topic khối lượng',
@@ -220,7 +346,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   width: 10,
                   height: 10,
                   decoration: BoxDecoration(
-                    color: scale.isConnected ? AppColors.success : AppColors.danger,
+                    // Tắt cân là trạng thái do người dùng chọn, không phải hỏng —
+                    // để chấm đỏ ở đây thì lần nào mở Cài đặt cũng tưởng có lỗi.
+                    color: !settings.scaleEnabled
+                        ? AppColors.muted
+                        : scale.isConnected
+                            ? AppColors.success
+                            : AppColors.danger,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -234,7 +366,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                 ),
                 TextButton(
-                  onPressed: () => ref.read(scaleProvider.notifier).reconnect(),
+                  onPressed: settings.scaleEnabled
+                      ? () => ref.read(scaleProvider.notifier).reconnect()
+                      : null,
                   child: const Text('Nối lại'),
                 ),
               ],
@@ -292,6 +426,97 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Ô thử đầu đọc của máy PDA.
+///
+/// Lắp PDA mới hay hỏng nhất ở chỗ **quên bật hậu tố Enter**: ký tự vẫn về app
+/// nhưng không bao giờ chốt thành mã, nhìn bên ngoài y như máy chết. Dòng "đang
+/// nhận" tách bạch hai trường hợp đó ra ngay.
+class _PdaScanTestCard extends StatelessWidget {
+  const _PdaScanTestCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<PdaScanProbe>(
+      valueListenable: pdaScanProbe,
+      builder: (context, probe, _) {
+        final code = probe.lastCode;
+
+        return SectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.bolt_rounded, size: 18, color: AppColors.indigoLight),
+                  SizedBox(width: 8),
+                  Text('Thử máy quét', style: TextStyle(fontWeight: FontWeight.w700)),
+                ],
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Bóp cò ngay tại màn này. Mã hiện ra bên dưới là máy đã chạy đúng.',
+                style: TextStyle(fontSize: 12.5, color: AppColors.muted, height: 1.4),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceAlt,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: (code == null ? AppColors.border : AppColors.success)
+                        .withValues(alpha: 0.6),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      code ?? 'Chưa nhận được mã nào',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontFamily: code == null ? null : 'monospace',
+                        fontWeight: FontWeight.w700,
+                        color: code == null ? AppColors.muted : AppColors.success,
+                      ),
+                    ),
+                    if (code != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Lúc ${Fmt.dateTime(probe.lastAt)}',
+                        style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (probe.pending.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Đang nhận: ${probe.pending}',
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontFamily: 'monospace',
+                    color: AppColors.warning,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 10),
+              const Text(
+                'Không ra mã mà dòng "đang nhận" vẫn chạy chữ: máy chưa bật hậu tố '
+                'Enter. Vào Scanner Settings của PDA, đặt Suffix = Enter (hoặc Tab) '
+                'và để đầu đọc ở chế độ bàn phím (HID / Keyboard Wedge).',
+                style: TextStyle(fontSize: 12, color: AppColors.muted, height: 1.5),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

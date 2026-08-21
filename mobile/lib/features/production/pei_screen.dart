@@ -9,6 +9,7 @@ import '../../data/models/printer.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/production_repository.dart';
 import '../../core/routes.dart';
+import '../../core/scan/pda_scan.dart';
 import '../scanner/scanner_screen.dart';
 import 'print_item_sheet.dart';
 
@@ -74,6 +75,15 @@ class _PeiScreenState extends ConsumerState<PeiScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return PdaScanScope(
+      // Chưa chọn mâm đích thì quét chẳng biết xếp vào đâu.
+      enabled: _targetSheetId != null,
+      onCode: _scanIntoSheet,
+      child: _buildScreen(context),
+    );
+  }
+
+  Widget _buildScreen(BuildContext context) {
     final sheetsAsync = ref.watch(peiSheetsProvider);
     final items = ref.watch(printItemsProvider).valueOrNull ?? const <PrintItem>[];
     final printers = ref.watch(printersProvider).valueOrNull ?? const <Printer>[];

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/format/formatters.dart';
 import '../../core/routes.dart';
+import '../../core/scan/pda_scan.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../../data/models/order.dart';
@@ -181,6 +182,31 @@ class _PrintItemsTab extends ConsumerStatefulWidget {
 class _PrintItemsTabState extends ConsumerState<_PrintItemsTab> {
   PrintItemStatus? _filter;
 
+  /// Tab "Đơn hàng" nằm chung màn nên vẫn sống khi người dùng chuyển qua lại.
+  /// Phải bám theo tab đang mở, không thì đứng ở tab Đơn hàng bóp cò cũng đẩy tem
+  /// sang trạng thái kế tiếp.
+  TabController? _tabs;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final controller = DefaultTabController.of(context);
+    if (controller != _tabs) {
+      _tabs?.removeListener(_onTabChanged);
+      _tabs = controller..addListener(_onTabChanged);
+    }
+  }
+
+  void _onTabChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _tabs?.removeListener(_onTabChanged);
+    super.dispose();
+  }
+
   /// Quét liên tục: mỗi mã hợp lệ được đẩy sang trạng thái kế tiếp
   /// (pending → printing → completed) đúng như tab Miếng in bản web.
   Future<String?> _handleScan(String code) async {
@@ -203,6 +229,14 @@ class _PrintItemsTabState extends ConsumerState<_PrintItemsTab> {
 
   @override
   Widget build(BuildContext context) {
+    return PdaScanScope(
+      enabled: _tabs?.index == 1,
+      onCode: _handleScan,
+      child: _buildScreen(context),
+    );
+  }
+
+  Widget _buildScreen(BuildContext context) {
     final itemsAsync = ref.watch(printItemsProvider);
 
     return Column(

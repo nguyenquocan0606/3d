@@ -5,12 +5,15 @@ import 'package:go_router/go_router.dart';
 import '../../data/models/bulk_order.dart';
 import '../../data/models/filament.dart';
 import '../../data/models/order.dart';
+import '../../data/models/eshop_order.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/filament_repository.dart';
 import '../../data/repositories/production_repository.dart';
+import '../../features/bulk/bulk_run_sheet.dart';
+import '../../features/bulk/bulk_scan.dart';
 import '../../features/production/print_item_sheet.dart';
-import '../../features/scanner/scan_result_sheet.dart';
 import '../../features/scanner/scanner_screen.dart';
+import '../routes.dart';
 import 'code_normalizer.dart';
 import 'scan_mode.dart';
 
@@ -25,6 +28,7 @@ final codeNormalizerProvider = Provider<CodeNormalizer>((ref) {
   final store = ref.watch(storeProvider).valueOrNull;
   final sheets = ref.watch(peiSheetsProvider).valueOrNull ?? const <PeiSheet>[];
   final orders = ref.watch(ordersProvider).valueOrNull ?? const <Order>[];
+  final eshopOrders = ref.watch(eshopOrdersProvider).valueOrNull ?? const <EshopOrder>[];
   final bulkOrders = ref.watch(bulkOrdersProvider).valueOrNull ?? const <BulkOrder>[];
 
   return CodeNormalizer(
@@ -38,6 +42,14 @@ final codeNormalizerProvider = Provider<CodeNormalizer>((ref) {
     orderCodes: {
       for (final order in orders) ...[
         if (order.orderCode != null) order.orderCode!,
+        order.id,
+      ],
+    },
+    eshopOrderCodes: {
+      for (final order in eshopOrders) ...[
+        if (order.ecomOrderNo != null) order.ecomOrderNo!,
+        if (order.deliveryCode != null) order.deliveryCode!,
+        if (order.refNo != null) order.refNo!,
         order.id,
       ],
     },
@@ -76,18 +88,14 @@ class ScanFailure implements Exception {
 /// | Mâm `PEI-<id>` | Chi tiết mâm + miếng in trên mâm |
 /// | Mã đơn hàng | Chi tiết đơn + tiến độ tem |
 /// | Mã đơn SLL `SLL-xxx` | Chi tiết đơn số lượng lớn + các lượt PEI |
-/// | Barcode 8 số | Bảng đổi trạng thái miếng in, hoặc lượt in SLL |
+/// | Barcode 8 số | Bảng đổi trạng thái miếng in — hoặc quẹt lượt in SLL |
 /// | Mã hàng hóa `SP-` | Chi tiết hàng hóa + nhập/xuất kho |
+/// | QR lệnh `CMD-` | Chạy lệnh (chỉ `CMD-INV-RESET` dùng được ngoài màn của nó) |
 ///
-/// **Quét ở màn toàn cục không tự ý làm gì.** Mọi loại mã đều dừng lại ở bảng
-/// [showScanResultSheet] để người quét đọc xem đó là mã gì rồi tự chọn việc —
-/// quét ở đây thường chỉ là "soi xem tem này là cái gì". Việc làm-ngay chỉ xảy ra
-/// khi quét từ trong màn nghiệp vụ tương ứng (Miếng in, Đơn SLL, Kiểm kho, Kiểm
-/// hàng, Cân) vì lúc đó chủ đích đã rõ.
-///
-/// Ngoại lệ duy nhất là **chế độ gán hàng loạt** (scanMode): người dùng đã bấm
-/// "gán cuộn" ở màn kho/máy in trước đó, nên mã cuộn quét tiếp được xử lý ngay để
-/// quét liên tiếp cho nhanh tay.
+/// **Quét là vào thẳng việc, không hỏi lại.** Trước đây mọi mã đều dừng ở một
+/// bảng "đây là mã gì, bạn muốn làm gì" — nhưng gần như loại nào cũng chỉ có đúng
+/// một việc để làm, nên bảng đó chỉ tốn thêm một cú chạm. Người cầm máy quét là
+/// người đang làm việc, không phải đang tra cứu.
 class ScanRouter {
   const ScanRouter(this._ref, {this.onOpen});
 
@@ -99,12 +107,32 @@ class ScanRouter {
 
   /// Trả về thông báo để hiển thị, hoặc null nếu không có gì để báo.
   Future<String?> handle(BuildContext context, String rawCode) async {
-    final scanned = _ref.read(codeNormalizerProvider).classify(rawCode);
+    var scanned = _ref.read(codeNormalizerProvider).classify(rawCode);
+
+    // Không nhận ra thì **chưa vội kết luận**: từ khi app tra mã trong CSDL cục
+    // bộ, một tem vừa in ở web mấy giây trước là máy này chưa kịp biết. Đồng bộ
+    // một nhịp rồi tra lại — thà chậm nửa giây còn hơn bắt thợ đi hỏi tại sao
+    // tem mới in lại báo mã lạ.
+    //
+    // Chỉ làm ở nhánh hỏng nên không ảnh hưởng tốc độ của mọi lần quét bình thường.
+    if (scanned.kind == ScanKind.unknown) {
+      try {
+        // `refreshCoreData` chứ không chỉ `dongBo()`: đồng bộ mới ghi vào SQLite,
+        // còn provider thì vẫn giữ dữ liệu đã đọc từ trước. Không đợi provider nạp
+        // lại xong thì câu tra ngay sau đây vẫn đọc đúng dữ liệu cũ và vô nghĩa.
+        await refreshCoreData(_ref);
+        await _ref.read(bulkOrdersProvider.notifier).refresh();
+        scanned = _ref.read(codeNormalizerProvider).classify(rawCode);
+      } catch (_) {
+        // Mất mạng: giữ nguyên kết luận cũ và báo lỗi bên dưới.
+      }
+    }
 
     if (scanned.kind == ScanKind.unknown) {
       throw ScanFailure(
         'Không nhận ra mã "${scanned.raw}".\n'
-        'Kiểm tra xem dữ liệu đã tải xong chưa, hoặc tem này thuộc hệ thống khác.',
+        'Đã thử đồng bộ lại nhưng máy chủ cũng không có mã này — kiểm tra xem tem '
+        'có thuộc hệ thống khác không.',
       );
     }
 
@@ -121,31 +149,138 @@ class ScanRouter {
       if (mode != null) return _assignSpool(scanned.id!, mode);
     }
 
-    // Bảng đổi trạng thái tem tự nó đã là bảng lựa chọn rồi.
-    if (scanned.kind == ScanKind.printItem) {
-      return _handlePrintItem(context, scanned.id!);
-    }
+    final open = _open(context);
 
-    if (!context.mounted) return null;
-    return showScanResultSheet(context, _ref, scanned, onOpen: _open(context));
+    switch (scanned.kind) {
+      case ScanKind.spool:
+        open(Routes.spoolDetail(scanned.id!));
+        return null;
+
+      case ScanKind.colorTag:
+        open(Routes.colorDetail(scanned.id!));
+        return null;
+
+      case ScanKind.location:
+        open(Routes.locationDetail(scanned.id!));
+        return null;
+
+      case ScanKind.printer:
+        open(Routes.printerDetail(scanned.id!));
+        return null;
+
+      // Tem dán trên khay AMS chỉ có một công dụng: gán cuộn vào đúng line đó.
+      // Muốn xem máy in thì đã có tem máy in riêng dán ngay trên thân máy.
+      case ScanKind.printerSlot:
+        return _startSlotAssign(scanned);
+
+      case ScanKind.peiSheet:
+        open(Routes.peiSheetDetail(scanned.id!));
+        return null;
+
+      case ScanKind.order:
+        open(Routes.orderDetail(scanned.id!));
+        return null;
+
+      case ScanKind.eshopOrder:
+        open(Routes.eshopOrderDetail(scanned.id!));
+        return null;
+
+      case ScanKind.bulkOrder:
+        open(Routes.bulkOrderDetail(scanned.id!));
+        return null;
+
+      case ScanKind.bulkRun:
+        return _handleBulkRun(context, scanned.id!);
+
+      case ScanKind.storeProduct:
+        return _openStoreProduct(open, scanned.id!);
+
+      case ScanKind.printItem:
+        return _handlePrintItem(context, scanned.id!);
+
+      case ScanKind.command:
+        return _runCommand(scanned.id!);
+
+      // Đã chặn ngay đầu hàm.
+      case ScanKind.unknown:
+        return null;
+    }
   }
 
   void Function(String route) _open(BuildContext context) =>
       onOpen ?? (route) => context.push(route);
+
+  /// Tem khay AMS `PRT-xx-L1..4`: bật chế độ gán để quét cuộn liên tiếp vào line.
+  Future<String?> _startSlotAssign(ScannedCode scanned) async {
+    final printers = _ref.read(printersProvider).valueOrNull ?? const [];
+    var name = scanned.id!;
+    for (final printer in printers) {
+      if (printer.id == scanned.id) name = printer.name;
+    }
+
+    _ref.read(scanModeProvider.notifier).start(
+          ScanMode(
+            target: ScanTarget.printer,
+            targetId: scanned.id!,
+            targetName: name,
+            action: ScanAction.add,
+            slot: scanned.slot,
+          ),
+        );
+    return 'Đã bật chế độ gán cuộn vào $name · Line ${scanned.slot}. '
+        'Quét tiếp mã cuộn nhựa.';
+  }
+
+  /// Hàng hóa cửa hàng: tem dán mã `maQR`, còn route đi theo id.
+  Future<String?> _openStoreProduct(
+    void Function(String route) open,
+    String code,
+  ) async {
+    final products = _ref.read(storeProvider).valueOrNull?.sanPham ?? const [];
+    String? productId;
+    for (final product in products) {
+      if (product.maQR == code || product.id == code) productId = product.id;
+    }
+    if (productId == null) {
+      throw ScanFailure('Không tìm thấy hàng hóa mã $code trong dữ liệu đã tải.');
+    }
+    open(Routes.storeDetail(productId));
+    return null;
+  }
+
+  /// QR lệnh — quét thay cho bấm nút.
+  ///
+  /// Các lệnh còn lại chỉ có nghĩa trong đúng màn của nó (Kiểm kho, Cân), nên quét
+  /// ở ngoài chỉ có thể nói cho người quét biết là đang đứng nhầm chỗ.
+  Future<String?> _runCommand(String command) async {
+    if (command == ScanCommands.inventoryReset) {
+      await _ref.read(inventorySessionProvider.notifier).reset();
+      return 'Đã bắt đầu phiên kiểm kho mới.';
+    }
+    throw ScanFailure(switch (command) {
+      ScanCommands.inventoryToggleAll => 'Lệnh này chỉ dùng trong màn Kiểm kho.',
+      ScanCommands.weightTab ||
+      ScanCommands.weightDone =>
+        'Lệnh này chỉ dùng trong màn Cân cuộn nhựa.',
+      _ => 'Lệnh QR "$command" không hỗ trợ.',
+    });
+  }
 
   /// Gán / tháo cuộn theo chế độ quét hàng loạt đang bật.
   Future<String?> _assignSpool(String spoolId, ScanMode mode) async {
     final repo = _ref.read(filamentRepositoryProvider);
     final isAdd = mode.action == ScanAction.add;
 
+    // `bindSpool` chứ không phải `updateSpool`: gán cuộn là thao tác quét tại kệ,
+    // phải chạy được cả khi mất sóng nên đi qua hàng đợi.
     if (mode.target == ScanTarget.location) {
-      await repo.updateSpool(
+      await repo.bindSpool(
         spoolId,
         locationId: isAdd ? mode.targetId : null,
         clearLocation: !isAdd,
       );
     } else {
-      await repo.updateSpool(
+      await repo.bindSpool(
         spoolId,
         printerId: isAdd ? mode.targetId : null,
         printerSlot: isAdd ? mode.slot : null,
@@ -177,25 +312,17 @@ class ScanRouter {
     return null;
   }
 
-  /// Mã 8 số không phải miếng in: có thể là lượt in SLL mà danh sách đơn trong
-  /// app chưa kịp có (vừa tạo ở máy khác). Tải lại rồi mở bảng lựa chọn — vẫn
-  /// **không** tự quẹt check-in/check-out hộ người dùng.
+  /// Quẹt lượt in SLL — mở bảng chi tiết, y hệt quẹt ngay trong màn Đơn SLL.
+  ///
+  /// [findBulkRun] tự tải lại một lần khi chưa thấy — lượt vừa tạo ở máy khác.
   Future<String?> _handleBulkRun(BuildContext context, String barcode) async {
-    await _ref.read(bulkOrdersProvider.notifier).refresh();
-
-    final orders = _ref.read(bulkOrdersProvider).valueOrNull ?? const <BulkOrder>[];
-    final found = orders.any((order) => order.runs.any((r) => r.id == barcode));
-    if (!found) {
+    final run = await findBulkRun(_ref, barcode);
+    if (run == null) {
       throw ScanFailure('Không tìm thấy miếng in hay lượt in mã $barcode.');
     }
-
     if (!context.mounted) return null;
-    return showScanResultSheet(
-      context,
-      _ref,
-      ScannedCode(raw: barcode, kind: ScanKind.bulkRun, id: barcode),
-      onOpen: _open(context),
-    );
+    // Truyền `onOpen` xuống để nút "Mở đơn SLL" mở được sau khi màn quét đã đóng.
+    return showBulkRunSheet(context, _ref, run, onOpen: onOpen);
   }
 }
 

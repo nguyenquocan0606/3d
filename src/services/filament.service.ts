@@ -86,8 +86,26 @@ export class FilamentService {
         where: { id },
       });
       return { success: true, data: true };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Lỗi khi xóa loại nhựa' };
+    } catch (error: any) {
+      console.error('FilamentService.deleteFilament error:', error);
+      return { success: false, error: 'Không thể xóa loại nhựa. Có thể đang có cuộn nhựa sử dụng loại này.' };
+    }
+  }
+
+  /**
+   * Cập nhật mã màu hex cho TẤT CẢ các loại nhựa có cùng colorName.
+   * Do người dùng có thể gộp chung thẻ màu cho cả PLA, PETG... cùng tên màu.
+   */
+  static async updateFilamentColor(colorName: string, colorHex: string): Promise<Result<boolean>> {
+    try {
+      await prisma.filament.updateMany({
+        where: { colorName },
+        data: { colorHex },
+      });
+      return { success: true, data: true };
+    } catch (error: any) {
+      console.error('FilamentService.updateFilamentColor error:', error);
+      return { success: false, error: 'Lỗi khi cập nhật mã màu.' };
     }
   }
 

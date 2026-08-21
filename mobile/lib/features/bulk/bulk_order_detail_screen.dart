@@ -10,6 +10,7 @@ import '../../data/repositories/bulk_repository.dart';
 import '../../data/repositories/label_repository.dart';
 import 'bulk_orders_screen.dart';
 import 'bulk_scan.dart';
+import 'bulk_verify_screen.dart';
 import 'edit_bulk_order_sheet.dart';
 
 /// Chi tiết 1 đơn SLL: lượt in gom theo máy, mỗi lượt quẹt được ngay tại chỗ.
@@ -20,6 +21,10 @@ class BulkOrderDetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    return BulkRunPdaScope(child: _buildScreen(context, ref));
+  }
+
+  Widget _buildScreen(BuildContext context, WidgetRef ref) {
     final orders = ref.watch(bulkOrdersProvider);
     final order = ref.watch(bulkOrderByIdProvider(orderId));
 
@@ -70,6 +75,10 @@ class BulkOrderDetailScreen extends ConsumerWidget {
                 if (order.pendingRework > 0) ...[
                   const SizedBox(height: 10),
                   _ReworkButton(order: order),
+                ],
+                if (order.runsToVerify.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  _VerifyButton(order: order),
                 ],
                 const SizedBox(height: 14),
                 for (final group in order.runsByPrinter) ...[
@@ -211,6 +220,38 @@ class _ReworkButtonState extends ConsumerState<_ReworkButton> {
       style: FilledButton.styleFrom(
         backgroundColor: AppColors.danger,
         minimumSize: const Size.fromHeight(AppSize.touchTarget),
+      ),
+    );
+  }
+}
+
+/// Mở màn kiểm hàng — quẹt lại các mâm đã in xong để đối soát trước khi giao.
+class _VerifyButton extends StatelessWidget {
+  const _VerifyButton({required this.order});
+
+  final BulkOrder order;
+
+  @override
+  Widget build(BuildContext context) {
+    final can = order.runsToVerify.length;
+    final xong = order.verifiedRuns;
+    final du = xong >= can;
+
+    return OutlinedButton.icon(
+      onPressed: () => Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => BulkVerifyScreen(orderId: order.id),
+        ),
+      ),
+      icon: Icon(
+        du ? Icons.verified_rounded : Icons.fact_check_outlined,
+        color: du ? AppColors.success : AppColors.warning,
+      ),
+      label: Text('Kiểm hàng ($xong/$can mâm)'),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(AppSize.touchTarget),
+        side: BorderSide(color: du ? AppColors.success : AppColors.warning),
+        foregroundColor: du ? AppColors.success : AppColors.warning,
       ),
     );
   }
@@ -368,7 +409,8 @@ class _RunRowState extends ConsumerState<_RunRow> {
                     BulkStatus.printing =>
                       'Bắt đầu ${Fmt.dateTime(run.startedAt)}',
                     BulkStatus.completed =>
-                      'Xong ${Fmt.dateTime(run.finishedAt)} · ${Fmt.duration(run.elapsed)}',
+                      'Xong ${Fmt.dateTime(run.finishedAt)} · ${Fmt.duration(run.elapsed)}'
+                          '${run.isVerified ? ' · đã kiểm' : ''}',
                   },
                   style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
                 ),

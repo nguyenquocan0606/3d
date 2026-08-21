@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/utils/db';
 import { printerManager } from '@/services/printer-integration/PrinterManager';
+import type { PrinterStatusData } from '@/services/printer-integration/types';
 
 export async function GET(request: Request) {
   try {
@@ -27,7 +28,7 @@ export async function GET(request: Request) {
     });
 
     // Lấy status tất cả máy in song song thay vì tuần tự
-    const results: Record<string, any> = {};
+    const results: Record<string, PrinterStatusData | { status: string }> = {};
     await Promise.all(
       linkedPrinters.map(async (prt) => {
         if (prt.cloudAccountId && prt.cloudPrinterId) {
@@ -39,7 +40,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ status: 'success', data: results });
 
-  } catch (error: any) {
+  } catch (error) {
     console.error('[API Cloud Status] Error:', error);
     return NextResponse.json({ status: 'error', message: 'Internal Server Error' }, { status: 500 });
   }

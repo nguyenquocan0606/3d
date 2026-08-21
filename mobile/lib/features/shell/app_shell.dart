@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/routes.dart';
+import '../../core/scan/pda_scan.dart';
 import '../../core/scan/scan_mode.dart';
 import '../../core/scan/scan_router.dart';
 import '../../core/theme/app_theme.dart';
+import '../../data/sync/sync_service.dart';
 
 /// Khung điều hướng chính.
 ///
@@ -36,10 +39,21 @@ class AppShell extends ConsumerWidget {
     // Thanh dưới phải né vạch gesture (Android) / home indicator (iPhone).
     final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
 
+    // Đích cuối cùng của mã quét từ máy PDA: màn nào không tự nhận thì mã rơi về
+    // đây và đi qua đúng bộ điều phối của nút quét giữa thanh — quét ở đâu cũng
+    // ra được "tem này là cái gì".
+    return PdaScanScope(
+      onCode: (code) => ScanRouter(ref).handle(context, code),
+      child: _buildShell(scanMode, bottomInset),
+    );
+  }
+
+  Widget _buildShell(ScanMode? scanMode, double bottomInset) {
     return Scaffold(
       body: Column(
         children: [
           if (scanMode != null) _ScanModeBar(mode: scanMode),
+          const _SyncStatusBar(),
           Expanded(child: navigationShell),
         ],
       ),
@@ -195,6 +209,94 @@ class _NavItem extends StatelessWidget {
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   ),
                 ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Thanh chỉ báo trạng thái đồng bộ — ẩn khi mọi thứ ổn, hiện khi có việc cần chú ý.
+///
+/// Thứ tự ưu tiên hiển thị:
+///  1. **Bị từ chối** (đỏ): thợ PHẢI xử lý, tô màu đậm nhất.
+///  2. **Chờ gửi** (vàng): có hành động trong hàng đợi.
+///  3. **Đang đồng bộ** (tím nhạt): worker đang chạy.
+///  4. Không hiện: tất cả ổn.
+///
+/// Bấm vào thanh → mở [PendingActionsScreen].
+class _SyncStatusBar extends ConsumerWidget {
+  const _SyncStatusBar();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sync = ref.watch(syncProvider);
+
+    // Không hiện khi không có gì đáng chú ý
+    if (!sync.dangChay && sync.choGui == 0 && sync.biTuChoi == 0) {
+      return const SizedBox.shrink();
+    }
+
+    final Color bgColor;
+    final Color fgColor;
+    final IconData icon;
+    final String label;
+
+    if (sync.biTuChoi > 0) {
+      bgColor = AppColors.danger;
+      fgColor = Colors.white;
+      icon = Icons.error_rounded;
+      label = '${sync.biTuChoi} thao tác bị từ chối — bấm để xem';
+    } else if (sync.choGui > 0) {
+      bgColor = AppColors.warning.withValues(alpha: 0.18);
+      fgColor = AppColors.warning;
+      icon = Icons.upload_rounded;
+      label = '${sync.choGui} thao tác chờ gửi lên';
+    } else {
+      bgColor = AppColors.indigo.withValues(alpha: 0.14);
+      fgColor = AppColors.indigoLight;
+      icon = Icons.sync_rounded;
+      label = 'Đang đồng bộ…';
+    }
+
+    return Material(
+      color: bgColor,
+      child: SafeArea(
+        top: false,
+        bottom: false,
+        child: InkWell(
+          onTap: sync.biTuChoi > 0 || sync.choGui > 0
+              ? () => context.push(Routes.pendingSync)
+              : null,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+            child: Row(
+              children: [
+                Icon(icon, size: AppSize.iconSm, color: fgColor),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: AppSize.textCaption,
+                      fontWeight: FontWeight.w600,
+                      color: fgColor,
+                    ),
+                  ),
+                ),
+                if (sync.dangChay)
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color: fgColor,
+                    ),
+                  )
+                else if (sync.biTuChoi > 0 || sync.choGui > 0)
+                  Icon(Icons.chevron_right_rounded, size: AppSize.iconSm, color: fgColor),
               ],
             ),
           ),

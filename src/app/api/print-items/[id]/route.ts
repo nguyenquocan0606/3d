@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/utils/db';
+import { ghiBiaMo } from '@/services/sync.service';
+import { baoThayDoi } from '@/services/sync-notify.service';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -49,6 +51,8 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     await prisma.printItem.delete({
       where: { id }
     });
+    await ghiBiaMo('printItems', id);
+    void baoThayDoi(['printItems']);
     return NextResponse.json({ status: 'success' });
   } catch (error: any) {
     return NextResponse.json({ status: 'error', message: error.message }, { status: 500 });

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/format/formatters.dart';
 import '../../core/routes.dart';
+import '../../core/scan/pda_scan.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../../data/models/store.dart';
@@ -61,6 +62,10 @@ class _StoreScreenState extends ConsumerState<StoreScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return PdaScanScope(onCode: _openProduct, child: _buildScreen(context));
+  }
+
+  Widget _buildScreen(BuildContext context) {
     final productsAsync = ref.watch(storeProductsProvider);
     final all = productsAsync.valueOrNull ?? const <StoreProduct>[];
     // Thống kê chỉ tính sản phẩm mẹ — combo dùng chung tồn kho vật lý với mẹ.
@@ -84,89 +89,118 @@ class _StoreScreenState extends ConsumerState<StoreScreen> {
         builder: (data) {
           final visible = _apply(data);
 
+          // CustomScrollView chứ không phải ListView: phần đầu (thống kê, ô tìm,
+          // bộ lọc) luôn phải dựng, nhưng danh sách hàng hóa thì để sliver dựng
+          // dần theo tầm nhìn. Cửa hàng có vài trăm mặt hàng, mỗi dòng lại kèm
+          // ảnh — dựng hết một lượt là máy yếu đứng hình mỗi lần gõ ô tìm kiếm.
           return RefreshIndicator(
             onRefresh: () => ref.read(storeProvider.notifier).refresh(),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: StatTile(
-                        label: 'Mặt hàng',
-                        value: Fmt.number(parents.length),
-                        icon: Icons.category_rounded,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: StatTile(
-                        label: 'Giá trị kho',
-                        value: Fmt.money(
-                          parents.fold<double>(0, (sum, p) => sum + p.inventoryValue),
-                        ),
-                        icon: Icons.payments_rounded,
-                        color: AppColors.success,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                StatTile(
-                  label: 'Sắp hết hàng',
-                  value: Fmt.number(parents.where((p) => p.isLowStock).length),
-                  icon: Icons.warning_amber_rounded,
-                  color: AppColors.warning,
-                  caption: _onlyLowStock
-                      ? 'Đang lọc — chạm để bỏ lọc'
-                      : 'Chạm để chỉ xem hàng sắp hết',
-                  onTap: () => setState(() => _onlyLowStock = !_onlyLowStock),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  onChanged: (value) => setState(() => _query = value),
-                  decoration: const InputDecoration(
-                    hintText: 'Tìm tên, mã, nhà cung cấp...',
-                    prefixIcon: Icon(Icons.search_rounded),
-                    isDense: true,
+            child: CustomScrollView(
+              // Danh sách ngắn vẫn phải kéo xuống được thì mới làm mới được.
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  sliver: SliverToBoxAdapter(
+                    child: _header(parents, categories),
                   ),
                 ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ActionChip(
-                      avatar: const Icon(Icons.filter_list_rounded, size: 16),
-                      label: Text(_category),
-                      onPressed: () => _pickCategory(categories),
-                    ),
-                    ActionChip(
-                      avatar: const Icon(Icons.sort_rounded, size: 16),
-                      label: Text(_sort.label),
-                      onPressed: _pickSort,
-                    ),
-                    FilterChip(
-                      label: const Text('Ẩn combo'),
-                      selected: _hideCombo,
-                      onSelected: (value) => setState(() => _hideCombo = value),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
                 if (visible.isEmpty)
-                  const EmptyView(message: 'Không có hàng hóa nào khớp bộ lọc.')
-                else
-                  for (final product in visible)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: StoreProductTile(product: product),
+                  const SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: EmptyView(
+                      message: 'Không có hàng hóa nào khớp bộ lọc.',
                     ),
+                  )
+                else
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+                    sliver: SliverList.separated(
+                      itemCount: visible.length,
+                      itemBuilder: (context, index) =>
+                          StoreProductTile(product: visible[index]),
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    ),
+                  ),
               ],
             ),
           );
         },
       ),
+    );
+  }
+
+  /// Phần đầu màn: thống kê, ô tìm, bộ lọc. Luôn dựng cả cụm nên để gọn một chỗ.
+  Widget _header(List<StoreProduct> parents, List<String> categories) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: StatTile(
+                label: 'Mặt hàng',
+                value: Fmt.number(parents.length),
+                icon: Icons.category_rounded,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: StatTile(
+                label: 'Giá trị kho',
+                value: Fmt.money(
+                  parents.fold<double>(0, (sum, p) => sum + p.inventoryValue),
+                ),
+                icon: Icons.payments_rounded,
+                color: AppColors.success,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        StatTile(
+          label: 'Sắp hết hàng',
+          value: Fmt.number(parents.where((p) => p.isLowStock).length),
+          icon: Icons.warning_amber_rounded,
+          color: AppColors.warning,
+          caption: _onlyLowStock
+              ? 'Đang lọc — chạm để bỏ lọc'
+              : 'Chạm để chỉ xem hàng sắp hết',
+          onTap: () => setState(() => _onlyLowStock = !_onlyLowStock),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          onChanged: (value) => setState(() => _query = value),
+          decoration: const InputDecoration(
+            hintText: 'Tìm tên, mã, nhà cung cấp...',
+            prefixIcon: Icon(Icons.search_rounded),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ActionChip(
+              avatar: const Icon(Icons.filter_list_rounded, size: 16),
+              label: Text(_category),
+              onPressed: () => _pickCategory(categories),
+            ),
+            ActionChip(
+              avatar: const Icon(Icons.sort_rounded, size: 16),
+              label: Text(_sort.label),
+              onPressed: _pickSort,
+            ),
+            FilterChip(
+              label: const Text('Ẩn combo'),
+              selected: _hideCombo,
+              onSelected: (value) => setState(() => _hideCombo = value),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+      ],
     );
   }
 
@@ -181,6 +215,15 @@ class _StoreScreenState extends ConsumerState<StoreScreen> {
     );
     if (code == null || !mounted) return;
 
+    try {
+      await _openProduct(code);
+    } catch (error) {
+      if (mounted) showToast(context, '$error', isError: true);
+    }
+  }
+
+  /// Mở chi tiết hàng hóa theo mã dán trên kệ — dùng chung cho nút quét và PDA.
+  Future<String?> _openProduct(String code) async {
     final products = ref.read(storeProvider).valueOrNull?.sanPham ?? const [];
     StoreProduct? found;
     for (final product in products) {
@@ -188,10 +231,10 @@ class _StoreScreenState extends ConsumerState<StoreScreen> {
     }
 
     if (found == null) {
-      showToast(context, 'Không tìm thấy hàng hóa mã $code.', isError: true);
-      return;
+      throw Exception('Không tìm thấy hàng hóa mã ${code.trim()}.');
     }
     if (mounted) context.push(Routes.storeDetail(found.id));
+    return null;
   }
 
   Future<void> _pickCategory(List<String> categories) async {

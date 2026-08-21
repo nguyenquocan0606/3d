@@ -25,6 +25,7 @@ Script sinh thư mục `android/` + `ios/` bằng `flutter create`, rồi tự v
 - `minSdk = 29` (Android 10)
 - quyền `CAMERA` / `INTERNET`, cho phép cleartext HTTP (máy chủ LAN chạy `http://`)
 - iOS: `NSCameraUsageDescription`, `NSLocalNetworkUsageDescription`, ATS, deployment target 13.0
+- xóa `test/widget_test.dart` mẫu (nó gọi `MyApp` không tồn tại → `flutter analyze` báo lỗi)
 
 Đã lỡ chạy `flutter create` bằng tay rồi thì chỉ cần chạy riêng phần vá (chạy lại
 bao nhiêu lần cũng được):
@@ -103,9 +104,17 @@ màn hình chính nào qua nút **☰** trên thanh tiêu đề, khỏi phải q
 | `PRT-…-L1..4` slot AMS | Bật chế độ gán cuộn vào line đó |
 | `PEI-<id>` mâm in | Miếng in trên mâm + máy đang gắn |
 | Mã đơn hàng | Chi tiết đơn + tiến độ tem |
-| Barcode 8 số | Bảng đổi trạng thái miếng in |
+| `SLL-…` đơn số lượng lớn | Chi tiết đơn + các lượt PEI |
+| Barcode 8 số — miếng in | Bảng đổi trạng thái miếng in |
+| Barcode 8 số — lượt in SLL | Quẹt luôn: chờ in → đòi quét tiếp tem máy in; đang in → hỏi số con lỗi rồi chốt |
 | `SP-…` hàng hóa | Chi tiết + nhập/xuất kho |
 | `CMD-…` | QR lệnh (reset kiểm kho…) |
+
+**Quét là vào thẳng việc, không có bảng hỏi lại ở giữa.** Người cầm máy quét là
+người đang làm việc chứ không phải đang tra cứu, nên mỗi loại tem đi đúng một
+đường. Quét ở trong màn nghiệp vụ (Kiểm kho, Kiểm hàng, Miếng in, Mâm PEI, Đơn
+SLL, Cân, In tem) thì mã được chính màn đó xử lý, không rơi xuống bảng điều phối
+chung này.
 
 Mã được chuẩn hóa bằng cách bỏ `-` và viết hoa, nên `PLAWHT01` = `PLA-WHT-01`.
 
@@ -126,7 +135,7 @@ dính tới mã, QR và quét đều có trên app.
 
 | Nhóm | Màn hình | Ghi chú |
 |---|---|---|
-| Quét & mã | Quét toàn cục, **QR lệnh** (bảng `CMD-*` + QR slot AMS), In tem nhãn | QR xem to trên màn hình hoặc in ra dán |
+| Quét & mã | Quét toàn cục, **QR lệnh** (bảng `CMD-*` + QR slot AMS), In tem nhãn (**quét tem cũ → in lại ngay**) | QR xem to trên màn hình hoặc in ra dán |
 | Tổng quan | 5 chỉ số, cuộn sắp hết, phân bổ vật liệu/màu | widget số cân realtime |
 | Cuộn nhựa | Danh sách (lọc/sắp xếp), chi tiết, **cân**, gán kho/máy in, xóa, in tem, QR | |
 | **Thêm cuộn nhựa** | Tạo hàng loạt (tự tăng số mã), chọn loại nhựa có sẵn hoặc nhập mới, tự in tem | ngoại lệ tạo mới duy nhất |
@@ -138,7 +147,8 @@ dính tới mã, QR và quét đều có trên app.
 | Kiểm kho | Phiên kiểm, quét liên tục, tiến độ, bộ lọc, QR lệnh | thứ tự sắp xếp giống backend |
 | Hàng hóa | Danh sách + lọc/sắp xếp, chi tiết, **nhập/xuất/đặt tồn kho**, ảnh, lịch sử, combo | |
 | Trạm cân | Toàn màn hình, tare, hiệu chuẩn | |
-| Cài đặt | Máy chủ, API key, MQTT, kiểm tra kết nối, kiểm tra MISA | |
+| **Hoạt động máy in** | Nhật ký mọi hoạt động (bắt đầu, xong, tạm dừng, lỗi, mất kết nối, kẹt, nhiệt bất thường) + lọc chỉ sự cố | nhận **thông báo đẩy**, xem §10 |
+| Cài đặt | Máy chủ, API key, MQTT, kiểm tra kết nối, kiểm tra MISA, **chế độ quét (camera / máy PDA)**, **thông báo máy in** | xem §9, §10 |
 
 ### Cố ý **không** đưa lên app (giữ ở web)
 
@@ -162,7 +172,8 @@ lib/
 │   ├── api/api_client.dart   # Dio + bóc format {status, data, message} của backend
 │   ├── config/app_settings.dart
 │   ├── scale/                # MQTT trạm cân + phát âm thanh đọc số
-│   ├── scan/                 # phân loại mã + điều phối sau khi quét + chế độ hàng loạt
+│   ├── scan/                 # phân loại mã, điều phối sau khi quét, chế độ hàng loạt,
+│   │                         # và nhận mã từ máy PDA (pda_scan.dart)
 │   ├── format/               # tiền VND, gram, thời lượng + công thức định giá cửa hàng
 │   ├── theme/app_theme.dart  # dark-first, accent indigo — bám design system bản web
 │   └── widgets/common.dart
@@ -182,7 +193,7 @@ lib/
 
 | Bản web | App | Lý do |
 |---|---|---|
-| Súng quét HID bắt `keydown` toàn cục | Camera (`mobile_scanner`) | Điện thoại không có bàn phím ngoài. Nếu dùng súng Bluetooth HID, iOS coi như bàn phím — có thể bổ sung sau bằng `RawKeyboardListener`. |
+| Súng quét HID bắt `keydown` toàn cục | Camera (`mobile_scanner`) **hoặc** máy PDA (HID) — chọn trong Cài đặt | Điện thoại chỉ có camera, PDA chỉ có cò cứng. Xem §9. |
 | MQTT qua rewrite `/mqtt` của Next.js | Nối thẳng `ws://<host>:9001` | Ổn định hơn; vẫn đổi được trong Cài đặt (VD `wss://3d.quocan.click/mqtt`). |
 | Poll trạng thái máy in 5s / 5 phút | Chỉ poll khi đang mở màn Máy in | Tiết kiệm pin. |
 | Tem in bitmap render trên canvas | Gửi nội dung, server sinh TSPL | Bản xem trước trong app là mô phỏng bố cục, không pixel-perfect. |
@@ -248,3 +259,84 @@ Tạo base64 để dán vào secret:
 ```bash
 base64 -i Certificates.p12 | pbcopy
 ```
+
+---
+
+## 9. Máy PDA (đầu đọc laser thay cho camera)
+
+Xưởng chạy song song hai loại thiết bị nên **chế độ quét là cấu hình của từng
+máy**, chọn một lần trong *Cài đặt → Chế độ quét* rồi thôi:
+
+| Chế độ | Dùng cho | Thao tác |
+|---|---|---|
+| **Camera** | Điện thoại | Bấm nút quét → giơ máy vào mã |
+| **Máy PDA** | PDA có đầu đọc rời | Đứng ngay màn đang làm, **bóp cò** — không phải bấm nút quét |
+
+### Cài trên máy PDA
+
+Vào *Scanner Settings* của PDA (tên khác nhau tùy hãng) và đặt:
+
+- Chế độ xuất: **Keyboard Wedge / HID** (đầu đọc "gõ" mã như bàn phím).
+- Hậu tố (*Suffix*): **Enter** — hoặc Tab. Thiếu bước này là lỗi hay gặp nhất:
+  ký tự vẫn về app nhưng không bao giờ chốt thành mã, nhìn bên ngoài y như đầu
+  đọc chết.
+
+Bật chế độ PDA xong, trong Cài đặt có ô **Thử máy quét**: bóp cò ngay tại đó, mã
+hiện ra là chạy đúng. Nếu chỉ thấy dòng "đang nhận" chạy chữ mà không ra mã thì
+đúng là chưa bật hậu tố Enter.
+
+### Mã đi về đâu
+
+`PdaScanListener` (bọc cả app) ghép phím thành mã rồi giao cho `PdaScanScope` của
+màn đang mở. Màn nào không tự nhận thì mã rơi về `AppShell` và đi qua đúng bộ điều
+phối của nút quét giữa thanh — nghĩa là quét ở đâu cũng ra được "tem này là cái gì".
+
+Các màn tự nhận mã: Kiểm kho, Miếng in, Kiểm hàng đóng gói, Mâm PEI (đã chọn mâm
+đích), Chi tiết mâm PEI, Đơn SLL + chi tiết đơn, Tạo job in, Thêm cuộn nhựa, Bảng
+cân, Hàng hóa cửa hàng.
+
+Con trỏ đang nằm trong một ô nhập thì bộ bắt phím **nhường** — đầu đọc gõ thẳng
+vào ô đó, giống cách bản web bỏ qua `keydown` khi đang gõ (`src/app/page.tsx`).
+
+---
+
+## 10. Thông báo đẩy hoạt động máy in
+
+Máy chủ chạy một vòng giám sát (`src/services/printer-monitor.service.ts`, mặc định 20 giây một
+lượt) hỏi trạng thái mọi máy in đã ghép cloud, so với lần trước và ghi lại mỗi thay đổi:
+
+bắt đầu in · in xong · tạm dừng · in tiếp · hủy giữa chừng · máy báo lỗi · mất kết nối ·
+kết nối lại · tiến độ đứng yên quá lâu (nghi kẹt) · nhiệt bất thường.
+
+Mỗi sự kiện được ghi vào bảng `SuKienMayIn` rồi đẩy qua hai kênh: **push tới app này (FCM)** và
+**tin nhắn Zalo** (bật/chọn nhóm ở tab Tin nhắn Zalo trên web).
+
+### Bật push cho app — việc phải làm một lần
+
+App **vẫn chạy bình thường khi chưa cấu hình Firebase**, chỉ là không có push (vẫn xem được nhật
+ký trong màn Hoạt động máy in). Muốn có push:
+
+1. Tạo project trên [Firebase Console](https://console.firebase.google.com) (miễn phí).
+2. Thêm app Android với package `click.quocan.manage3d` → tải `google-services.json` → đặt vào
+   `mobile/android/app/google-services.json`.
+   Muốn build iOS thì thêm app iOS → tải `GoogleService-Info.plist` → đặt vào `mobile/ios/Runner/`.
+3. Chạy lại `python3 tool/patch_platforms.py` — script chỉ bật plugin google-services khi thấy file
+   trên, nên **phải chạy sau khi copy file vào**.
+4. Trên **máy chủ**: Firebase Console → Cài đặt dự án → Tài khoản dịch vụ → *Tạo khóa riêng tư mới*
+   → lưu file JSON thành `data/fcm-service-account.json` (thư mục `data/` không nằm trong git).
+   Đổi chỗ khác được bằng biến môi trường `FCM_SERVICE_ACCOUNT_FILE` hoặc dán thẳng JSON vào
+   `FCM_SERVICE_ACCOUNT`.
+5. Build lại app, mở lên và cho phép quyền thông báo. Máy sẽ hiện trong danh sách thiết bị ở tab
+   Tin nhắn Zalo trên web; bấm **Gửi thử** ở đó để kiểm tra cả đường đi.
+
+Trong app, mục **Cài đặt → Thông báo máy in** cho tắt/bật riêng từng máy và đặt tên máy (tên này
+hiện trên web để biết cái nào là cái nào).
+
+### Chỉnh ngưỡng cảnh báo (biến môi trường máy chủ)
+
+| Biến | Mặc định | Ý nghĩa |
+|---|---|---|
+| `PRINTER_MONITOR_INTERVAL_MS` | 20000 | chu kỳ quét |
+| `PRINTER_STALL_MINUTES` | 30 | tiến độ đứng yên bao lâu thì kêu kẹt |
+| `PRINTER_MAX_NOZZLE_C` | 300 | nhiệt vòi tối đa coi là bất thường |
+| `PRINTER_MAX_BED_C` | 120 | nhiệt bàn tối đa coi là bất thường |

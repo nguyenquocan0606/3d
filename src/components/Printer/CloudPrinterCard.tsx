@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Cloud, Printer, Edit2, Play, Pause, Square, LayoutDashboard, Settings2, Wind, Info, RefreshCw } from 'lucide-react';
+import { TinhTrangMay } from './tinh-trang-may';
 import { PrinterDetailsModal } from './PrinterDetailsModal';
 
 interface CloudPrinterCardProps {
@@ -273,7 +274,9 @@ export function CloudPrinterCard({ printer, liveStatus, onOpenQR, onManage }: Cl
           </div>
         </div>
 
-        {/* FILAMENTS SECTION (Cloud AMS & Local DB) */}
+        <TinhTrangMay payload={liveStatus?.extendedInfo?.payload} />
+
+        {/* FILAMENTS SECTION (AMS thật & Local DB) */}
         <div>
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-widest">
@@ -285,7 +288,7 @@ export function CloudPrinterCard({ printer, liveStatus, onOpenQR, onManage }: Cl
           <div className="space-y-3">
             {/* Cloud AMS */}
             <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-3">
-               <div className="text-[10px] font-bold text-slate-500 uppercase mb-2 px-1">Bambu Cloud AMS (Thực tế)</div>
+               <div className="text-[10px] font-bold text-slate-500 uppercase mb-2 px-1">AMS trên máy (thực tế)</div>
                <div className="flex justify-start gap-3 overflow-x-auto pb-1 custom-scrollbar">
                   {Array.from({ length: Math.max(4, liveStatus?.materials?.length || 0) }).map((_, idx) => {
                     const cloudMat = liveStatus?.materials?.[idx];
@@ -427,10 +430,12 @@ export function CloudPrinterCard({ printer, liveStatus, onOpenQR, onManage }: Cl
           </div>
       </div>
 
-      <PrinterDetailsModal 
-        isOpen={isDetailsOpen} 
-        onClose={() => setIsDetailsOpen(false)} 
-        extendedInfo={liveStatus?.extendedInfo} 
+      <PrinterDetailsModal
+        isOpen={isDetailsOpen}
+        onClose={() => setIsDetailsOpen(false)}
+        liveStatus={liveStatus}
+        may={printer.cloudPrinterId}
+        tenMay={printer.name}
       />
 
     </div>

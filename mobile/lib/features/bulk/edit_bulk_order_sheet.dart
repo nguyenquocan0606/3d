@@ -12,8 +12,9 @@ import 'printer_picker.dart';
 /// Sửa đơn SLL.
 ///
 /// Hai việc tách bạch: **Lưu thay đổi** chỉ đụng phần mô tả, còn **Chia lại lượt
-/// in** (đổi tổng số con / số con mỗi mâm / máy chạy) xóa sạch lượt cũ và cấp mã
-/// vạch mới — tem đã in thành rác, mốc check-in/out mất hết, nên phải hỏi lại.
+/// in** (đổi tổng số con / số con mỗi mâm / máy chạy) viết lại kế hoạch in của
+/// phần **chưa chạy** — lượt đã quẹt và lượt in bù giữ nguyên, mã vạch cũ được
+/// dùng lại theo thứ tự, thừa thì xóa từ cuối, thiếu thì cấp mã mới.
 Future<void> showEditBulkOrderSheet(BuildContext context, BulkOrder order) {
   return showModalBottomSheet<void>(
     context: context,
@@ -41,13 +42,17 @@ class _EditBulkOrderSheetState extends ConsumerState<_EditBulkOrderSheet> {
   late final _note = TextEditingController(text: widget.order.note ?? '');
   late BulkStatus _status = widget.order.status;
 
-  // ── Khối chia lại lượt: tách riêng vì nó xóa sạch lượt cũ + mã vạch cũ ──
+  // ── Khối chia lại lượt: tách riêng vì nó viết lại kế hoạch in của đơn ──
   bool _chiaLai = false;
   late final _totalQuantity =
       TextEditingController(text: '${widget.order.totalQuantity}');
   late final _perSheetQty = TextEditingController(text: '${widget.order.perSheetQty}');
   late final List<String> _printerIds = _thuTuMayCu();
   late final Map<String, String> _limits = _sucChuaCu();
+
+  /// Đổi số con/mâm phần lớn là do khai nhầm (34 mà thật ra 35), nên mặc định sửa
+  /// luôn số con của những mâm ĐẦY đã in — nếu không tổng số con của đơn đếm sai.
+  bool _suaLuotDaChay = true;
 
   bool _saving = false;
 
@@ -126,14 +131,22 @@ class _EditBulkOrderSheetState extends ConsumerState<_EditBulkOrderSheet> {
       return;
     }
 
-    final daChay =
-        widget.order.runs.where((r) => r.status != BulkStatus.pending).length;
+    final plan = chiaLaiGiuTienDo(
+      widget.order.runs,
+      total,
+      _printerIds,
+      sucChuaTheoMay(_printerIds, _limits, perSheet),
+      suaLuotDaChay: _suaLuotDaChay,
+    );
     final ok = await confirmAction(
       context,
       title: 'Chia lại lượt in',
-      message: 'Toàn bộ ${widget.order.runs.length} lượt hiện tại sẽ bị xóa và cấp mã '
-          'vạch mới. Tem đã in ra thành rác, phải in lại'
-          '${daChay > 0 ? ' — kể cả $daChay lượt đã quẹt (mốc giờ mất hết).' : '.'}',
+      message: 'Giữ nguyên ${plan.giuNguyen} lượt đã chạy (${plan.daKhoa} con'
+          '${plan.suaDaChay.isNotEmpty ? ', sửa số con ${plan.suaDaChay.length} mâm đã in' : ''}). '
+          '${plan.dungLaiMa} lượt chưa chạy được tính lại nhưng giữ nguyên mã vạch'
+          '${plan.themMoi > 0 ? ', thêm ${plan.themMoi} lượt mới (phải in tem)' : ''}'
+          '${plan.xoa > 0 ? ', xóa ${plan.xoa} lượt thừa' : ''}. '
+          'Số PEI / số con in trên tem cũ có thể sai — in lại cho khớp.',
       confirmLabel: 'Chia lại',
     );
     if (!ok) return;
@@ -150,10 +163,11 @@ class _EditBulkOrderSheetState extends ConsumerState<_EditBulkOrderSheet> {
                 if ((int.tryParse(_limits[id] ?? '') ?? 0) > 0)
                   id: int.parse(_limits[id]!),
             },
+            suaLuotDaChay: _suaLuotDaChay,
           );
       await ref.read(bulkOrdersProvider.notifier).refresh();
       if (!mounted) return;
-      showToast(context, 'Đã chia lại lượt in — nhớ in lại tem.');
+      showToast(context, 'Đã chia lại lượt in — phần đã chạy giữ nguyên.');
       Navigator.pop(context);
     } catch (error) {
       if (mounted) {
@@ -242,17 +256,19 @@ class _EditBulkOrderSheetState extends ConsumerState<_EditBulkOrderSheet> {
     final total = int.tryParse(_totalQuantity.text.trim()) ?? 0;
     final perSheet = int.tryParse(_perSheetQty.text.trim()) ?? 0;
     final capacities = sucChuaTheoMay(_printerIds, _limits, perSheet);
-    final planned = chiaLuotInTheoMay(total, capacities);
+    final plan = chiaLaiGiuTienDo(widget.order.runs, total, _printerIds, capacities,
+        suaLuotDaChay: _suaLuotDaChay);
 
     return SectionCard(
       borderColor: AppColors.warning,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Chia lại sẽ xóa toàn bộ ${widget.order.runs.length} lượt hiện tại và cấp '
-            'mã vạch mới: tem đã in ra thành rác, mốc check-in/check-out mất hết.',
-            style: const TextStyle(fontSize: 12.5, color: AppColors.danger, height: 1.5),
+          const Text(
+            'Lượt đã quẹt và lượt in bù được giữ nguyên (số con, máy, mốc giờ, số '
+            'lỗi). Chỉ phần chưa chạy bị tính lại — mã vạch cũ dùng lại theo thứ '
+            'tự, thừa thì xóa từ cuối, thiếu thì cấp mã mới.',
+            style: TextStyle(fontSize: 12.5, color: AppColors.warning, height: 1.5),
           ),
           const SizedBox(height: 10),
           _field(_totalQuantity, 'Tổng số con *', numeric: true),
@@ -278,14 +294,43 @@ class _EditBulkOrderSheetState extends ConsumerState<_EditBulkOrderSheet> {
             }),
             onLimit: (id, value) => setState(() => _limits[id] = value),
           ),
-          if (planned.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          CheckboxListTile(
+            value: _suaLuotDaChay,
+            onChanged: (v) => setState(() => _suaLuotDaChay = v ?? true),
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            title: Text(
+              plan.suaDaChay.isEmpty
+                  ? 'Sửa cả các mâm đã in'
+                  : 'Sửa cả các mâm đã in (${plan.suaDaChay.length} mâm: '
+                      '${plan.suaDaChay.first.cu} → ${plan.suaDaChay.first.moi} con)',
+              style: const TextStyle(fontSize: 13),
+            ),
+            subtitle: const Text(
+              'Bật khi số con/mâm cũ bị khai nhầm: mâm ĐẦY đã in cũng sửa lại số con '
+              '(mốc giờ, số lỗi, mã vạch giữ nguyên).',
+              style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.4),
+            ),
+          ),
+          if (plan.luotMoi.isNotEmpty || plan.xoa > 0) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Giữ ${plan.giuNguyen} lượt đã chạy (${plan.daKhoa} con'
+              '${plan.suaDaChay.isNotEmpty ? ', sửa ${plan.suaDaChay.length} mâm' : ''}) · tính lại '
+              '${plan.dungLaiMa} lượt (giữ mã)'
+              '${plan.themMoi > 0 ? ' · thêm ${plan.themMoi} lượt mới' : ''}'
+              '${plan.xoa > 0 ? ' · xóa ${plan.xoa} lượt thừa' : ''}',
+              style: const TextStyle(fontSize: 12.5, color: AppColors.muted, height: 1.5),
+            ),
             const SizedBox(height: 6),
             SplitPreview(
               printers: printers,
               selectedIds: _printerIds,
-              planned: planned,
+              planned: plan.luotMoi,
               capacities: capacities,
-              title: 'Sẽ chia lại thành',
+              title: 'Phần chia lại',
             ),
           ],
           const SizedBox(height: 14),

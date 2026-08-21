@@ -1,261 +1,175 @@
-import React, { useMemo } from 'react';
-import { X, Info, Box, Thermometer, Wind, Layers, Settings2, Clock, Scale } from 'lucide-react';
+'use client';
 
-interface PrinterDetailsModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  extendedInfo: any;
+import React from 'react';
+import { Clock, Info, Layers, Radio, ServerCog, Thermometer, Wifi, X } from 'lucide-react';
+import { CamMayIn } from './cam-may-in';
+import { TinhTrangMay, type TinhTrang } from './tinh-trang-may';
+
+/**
+ * Bảng chi tiết một máy in.
+ *
+ * Viết lại từ đầu khi bỏ đường Home Assistant làm nguồn chính: bản cũ đọc đúng cái payload riêng
+ * của ha-bambulab (`project.slice_result`, `nozzles[]`, `firmware_version`…) — những thứ MQTT thô
+ * không có. Giờ chỉ dựa vào các trường mà **cả hai** nguồn đều cung cấp, nên hiện đúng dù máy đang
+ * chạy MQTT hay đang phải mượn Home Assistant.
+ */
+
+export type TrangThaiSong = {
+  status?: string;
+  progress?: number;
+  nozzleTemp?: number;
+  nozzleTargetTemp?: number;
+  bedTemp?: number;
+  bedTargetTemp?: number;
+  remainingTimeSeconds?: number;
+  fileName?: string;
+  previewUrl?: string;
+  materials?: Array<{ name: string; color: string } | null>;
+  extendedInfo?: { provider?: string; payload?: TinhTrang & Record<string, unknown> };
+};
+
+const NHAN_TRANG_THAI: Record<string, string> = {
+  printing: 'Đang in',
+  idle: 'Rảnh',
+  error: 'Lỗi / tạm dừng',
+  offline: 'Mất kết nối',
+  maintenance: 'Bảo trì',
+};
+
+function O({ icon, nhan, giaTri }: { icon: React.ReactNode; nhan: string; giaTri: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-slate-700/60 bg-slate-800/40 p-3">
+      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+        {icon}
+        {nhan}
+      </div>
+      <div className="text-sm font-semibold text-slate-100">{giaTri}</div>
+    </div>
+  );
 }
 
-export function PrinterDetailsModal({ isOpen, onClose, extendedInfo }: PrinterDetailsModalProps) {
-  const parsedData = useMemo(() => {
-    if (!extendedInfo) return null;
-    
-    let sliceParam: any = {};
-    let sliceResult: any = {};
-    let settings: any = {};
+function thoiGian(giay: number | undefined): string {
+  if (!giay) return '—';
+  const phut = Math.round(giay / 60);
+  if (phut < 60) return `${phut} phút`;
+  return `${Math.floor(phut / 60)}h ${phut % 60}m`;
+}
 
-    try {
-      if (extendedInfo.project?.slice_param) sliceParam = JSON.parse(extendedInfo.project.slice_param);
-    } catch {}
-
-    try {
-      if (extendedInfo.project?.slice_result) sliceResult = JSON.parse(extendedInfo.project.slice_result);
-    } catch {}
-
-    try {
-      if (extendedInfo.project?.settings) settings = JSON.parse(extendedInfo.project.settings);
-    } catch {}
-
-    return {
-      project: extendedInfo.project || {},
-      parameter: extendedInfo.parameter || {},
-      mqtt: extendedInfo.mqtt || {},
-      sliceParam,
-      sliceResult,
-      settings,
-    };
-  }, [extendedInfo]);
-
+export function PrinterDetailsModal({
+  isOpen,
+  onClose,
+  liveStatus,
+  may,
+  tenMay,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  liveStatus: TrangThaiSong | undefined;
+  /** `cloudPrinterId` — khoá để route camera tìm ra IP và Access Code của máy. */
+  may?: string | null;
+  tenMay?: string;
+}) {
   if (!isOpen) return null;
 
-  if (!parsedData) {
-    return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-          <div className="p-4 flex justify-between items-center border-b border-slate-800">
-            <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-              <Info size={18} className="text-indigo-400" /> Chi tiết dữ liệu máy in
-            </h3>
-            <button onClick={onClose} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
-          </div>
-          <div className="p-8 text-center text-slate-400">
-            Không có dữ liệu mở rộng (chưa kết nối hoặc API chưa trả về)
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const payload = liveStatus?.extendedInfo?.payload;
+  const nguon = payload?.nguon;
 
-  if (extendedInfo?.provider === 'bambulab') {
-    const payload = extendedInfo.payload;
-    const timeStr = payload.remaining_time ? (payload.remaining_time > 60 ? `${Math.floor(payload.remaining_time / 60)}h ${payload.remaining_time % 60}m` : `${payload.remaining_time}m`) : 'N/A';
-    const nozzle = payload.nozzles?.[0] || {};
-    return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-          <div className="flex items-center justify-between p-5 border-b border-slate-800 bg-slate-850/80 sticky top-0 z-10">
-            <div className="flex items-center gap-4">
-              {payload.previewUrl && (
-                <div className="w-16 h-16 rounded-xl overflow-hidden border border-slate-700 shrink-0">
-                  <img src={payload.previewUrl} alt="Preview" className="w-full h-full object-cover" />
-                </div>
-              )}
-              <div>
-                <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2 mb-1">
-                  <Info size={18} className="text-green-400" />
-                  Chi tiết: {payload.name || 'Bambu Lab Printer'}
-                </h3>
-                <p className="text-xs text-slate-400 truncate max-w-lg">
-                  {payload.current_print || 'Không xác định file'}
-                </p>
-              </div>
-            </div>
-            <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors p-2 rounded-xl hover:bg-slate-800">
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-800 p-5">
+          <h3 className="flex items-center gap-2 text-lg font-bold text-slate-100">
+            <Info size={18} className="text-indigo-400" />
+            Chi tiết máy in
+          </h3>
+          <div className="flex items-center gap-3">
+            {nguon === 'mqtt' && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
+                <Radio size={10} /> MQTT
+              </span>
+            )}
+            {nguon === 'ha' && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-400">
+                <ServerCog size={10} /> Home Assistant
+              </span>
+            )}
+            <button onClick={onClose} className="p-1 text-slate-400 hover:text-white">
               <X size={20} />
             </button>
           </div>
-          <div className="p-5 overflow-y-auto flex-1 custom-scrollbar space-y-6">
-            <section>
-              <div className="flex items-center gap-2 mb-3 text-sm font-bold text-emerald-400 uppercase tracking-wider">
-                <Clock size={16} /> Trạng thái Thời gian thực
+        </div>
+
+        {!liveStatus ? (
+          <div className="p-8 text-center text-slate-400">Chưa có dữ liệu — máy chưa kết nối.</div>
+        ) : (
+          <div className="space-y-5 overflow-y-auto p-5">
+            <div className="flex items-start gap-4">
+              {liveStatus.previewUrl && (
+                // eslint-disable-next-line @next/next/no-img-element -- ảnh do Home Assistant phục vụ, không qua loader của Next
+                <img
+                  src={liveStatus.previewUrl}
+                  alt="Ảnh bản in"
+                  className="h-20 w-20 shrink-0 rounded-xl border border-slate-700 object-cover"
+                />
+              )}
+              <div className="min-w-0">
+                <p className="truncate text-base font-bold text-slate-100">{liveStatus.fileName || 'Không có bản in'}</p>
+                <p className="text-sm text-slate-400">
+                  {NHAN_TRANG_THAI[liveStatus.status ?? ''] ?? liveStatus.status} · {Math.round(liveStatus.progress ?? 0)}%
+                </p>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <StatusBox icon={<Layers />} label="Lớp in (Layer)" value={`${payload.layer_num ?? 0} / ${payload.total_layers ?? '?'}`} />
-                <StatusBox icon={<Clock />} label="Thời gian còn lại" value={timeStr} />
-                <StatusBox icon={<Thermometer />} label="Nhiệt độ Đầu phun" value={`${Math.round(payload.temperatures?.nozzle ?? 0)}°C / ${Math.round(payload.temperatures?.nozzle_target ?? 0)}°C`} />
-                <StatusBox icon={<Thermometer />} label="Nhiệt độ Bàn in" value={`${Math.round(payload.temperatures?.bed ?? 0)}°C / ${Math.round(payload.temperatures?.bed_target ?? 0)}°C`} />
-                <StatusBox icon={<Wind />} label="Quạt làm mát" value={`${payload.cooling_fan_speed ?? 0}%`} />
-                <StatusBox icon={<Settings2 />} label="Chế độ tốc độ" value={`${payload.speed_level || 'N/A'}`} />
+            </div>
+
+            <TinhTrangMay payload={payload} />
+
+            <CamMayIn may={may} tenMay={tenMay} />
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <O
+                icon={<Thermometer size={11} />}
+                nhan="Đầu phun"
+                giaTri={`${Math.round(liveStatus.nozzleTemp ?? 0)}° / ${Math.round(liveStatus.nozzleTargetTemp ?? 0)}°`}
+              />
+              <O
+                icon={<Thermometer size={11} />}
+                nhan="Bàn in"
+                giaTri={`${Math.round(liveStatus.bedTemp ?? 0)}° / ${Math.round(liveStatus.bedTargetTemp ?? 0)}°`}
+              />
+              <O
+                icon={<Layers size={11} />}
+                nhan="Lớp in"
+                giaTri={`${payload?.layer_num ?? '—'} / ${payload?.total_layers ?? '—'}`}
+              />
+              <O icon={<Clock size={11} />} nhan="Còn lại" giaTri={thoiGian(liveStatus.remainingTimeSeconds)} />
+            </div>
+
+            {typeof payload?.wifi_signal === 'string' && (
+              <O icon={<Wifi size={11} />} nhan="Sóng wifi của máy" giaTri={payload.wifi_signal} />
+            )}
+
+            {(liveStatus.materials?.length ?? 0) > 0 && (
+              <div>
+                <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">Khay nhựa</div>
+                <div className="flex flex-wrap gap-2">
+                  {liveStatus.materials?.map((k, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2 rounded-lg border border-slate-700/60 bg-slate-800/40 px-2.5 py-1.5 text-xs"
+                    >
+                      <span
+                        className="h-4 w-4 rounded-full border border-slate-600"
+                        style={{ backgroundColor: k?.color ?? 'transparent' }}
+                      />
+                      <span className="text-slate-300">{k?.name ?? 'Trống'}</span>
+                      <span className="text-[10px] text-slate-500">#{i + 1}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </section>
-            <hr className="border-slate-800" />
-            <section>
-              <div className="flex items-center gap-2 mb-3 text-sm font-bold text-indigo-400 uppercase tracking-wider">
-                <Box size={16} /> Thông số Slicing (File In)
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <InfoRow label="Lượng nhựa dự kiến" value={`${payload.print_length || 'N/A'} (${payload.print_weight || 'N/A'})`} />
-                <InfoRow label="Loại mâm in (Bed)" value={payload.print_bed_type || 'N/A'} />
-                <InfoRow label="Số lượng chi tiết (Objects)" value={`${payload.printable_objects ?? 'N/A'} (Bỏ qua: ${payload.skipped_objects ?? 0})`} />
-                <InfoRow label="Thời gian bắt đầu" value={payload.start_time || 'N/A'} />
-                <InfoRow label="Thời gian dự kiến kết thúc" value={payload.end_time || 'N/A'} />
-              </div>
-            </section>
-            <hr className="border-slate-800" />
-            <section>
-              <div className="flex items-center gap-2 mb-3 text-sm font-bold text-amber-400 uppercase tracking-wider">
-                <Settings2 size={16} /> Cấu hình Phần cứng
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <InfoRow label="Đầu phun (Nozzle)" value={`${nozzle.nozzle_diameter ? nozzle.nozzle_diameter + 'mm' : 'N/A'} (${nozzle.nozzle_type || 'N/A'})`} />
-                <InfoRow label="Đèn buồng in" value={payload.chamber_light ? 'Đang bật' : 'Đang tắt'} />
-                <InfoRow label="Firmware" value={payload.firmware_version || 'N/A'} />
-              </div>
-            </section>
+            )}
           </div>
-          <div className="p-4 border-t border-slate-800 bg-slate-850/50 flex justify-end">
-            <button onClick={onClose} className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl transition-colors">
-              Đóng
-            </button>
-          </div>
-        </div>
+        )}
       </div>
-    );
-  }
-
-  const { project, parameter, sliceParam, sliceResult, settings, mqtt } = parsedData;
-  const rtSettings = mqtt.settings || settings.settings || {}; // ưu tiên mqtt realtime
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-slate-800 bg-slate-850/80 sticky top-0 z-10">
-          <div>
-            <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2 mb-1">
-              <Info size={18} className="text-indigo-400" />
-              Chi tiết: {project.printer_name || 'Máy in'}
-            </h3>
-            <p className="text-xs text-slate-400 truncate max-w-lg">
-              {mqtt.filename || project.gcode_name || 'Không xác định file'}
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white transition-colors p-2 rounded-xl hover:bg-slate-800"
-          >
-            <X size={20} />
-          </button>
-        </div>
-        
-        {/* Body */}
-        <div className="p-5 overflow-y-auto flex-1 custom-scrollbar space-y-6">
-          
-          {/* Section 1: Real-time Status */}
-          <section>
-            <div className="flex items-center gap-2 mb-3 text-sm font-bold text-emerald-400 uppercase tracking-wider">
-              <Clock size={16} />
-              Trạng thái Thời gian thực
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <StatusBox icon={<Layers />} label="Lớp in (Layer)" value={`${mqtt.curr_layer ?? settings.curr_layer ?? 0} / ${mqtt.total_layers ?? settings.total_layers ?? sliceResult.total_layers ?? '?'}`} />
-              
-              {(() => {
-                const remain = mqtt.remain_time ?? settings.remain_time;
-                const timeStr = remain ? (remain > 60 ? `${Math.floor(remain / 60)}h ${remain % 60}m` : `${remain}m`) : 'N/A';
-                return <StatusBox icon={<Clock />} label="Thời gian còn lại" value={timeStr} />
-              })()}
-
-              <StatusBox icon={<Thermometer />} label="Nhiệt độ Đầu phun" value={`${parameter.curr_nozzle_temp ?? mqtt.curr_nozzle_temp ?? mqtt.nozzle_temp ?? 0}°C / ${rtSettings.target_nozzle_temp ?? mqtt.target_nozzle_temp ?? sliceParam.temperature ?? 0}°C`} />
-              <StatusBox icon={<Thermometer />} label="Nhiệt độ Bàn in" value={`${parameter.curr_hotbed_temp ?? mqtt.curr_hotbed_temp ?? mqtt.bed_temp ?? 0}°C / ${rtSettings.target_hotbed_temp ?? mqtt.target_hotbed_temp ?? sliceParam.bed_temperature ?? 0}°C`} />
-              <StatusBox icon={<Wind />} label="Quạt tản nhiệt" value={`${rtSettings.fan_speed_pct ?? 0}% (Phụ: ${rtSettings.aux_fan_speed_pct ?? 0}%)`} />
-              <StatusBox icon={<Settings2 />} label="Chế độ tốc độ" value={rtSettings.print_speed_mode === 2 ? 'Normal' : rtSettings.print_speed_mode || 'N/A'} />
-              <StatusBox icon={<Box />} label="Z-Offset" value={`${rtSettings.z_comp ?? '0'} mm`} />
-              <StatusBox icon={<Scale />} label="Nhựa đã dùng" value={`${mqtt.supplies_usage || settings.supplies_usage ? ((mqtt.supplies_usage || settings.supplies_usage) / 1000).toFixed(2) + 'm' : 'N/A'}`} />
-            </div>
-          </section>
-
-          <hr className="border-slate-800" />
-
-          {/* Section 2: Slicing Parameters */}
-          <section>
-            <div className="flex items-center gap-2 mb-3 text-sm font-bold text-indigo-400 uppercase tracking-wider">
-              <Box size={16} />
-              Thông số Slicing (File In)
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <InfoRow label="Loại nhựa (Filament)" value={sliceParam.filament_type ? sliceParam.filament_type.split(';')[0] : 'N/A'} />
-              <InfoRow label="Thời gian in ước tính" value={sliceResult.print_time || 'N/A'} />
-              <InfoRow label="Lượng nhựa dự kiến" value={`${sliceResult.used_filament ? sliceResult.used_filament + 'm' : 'N/A'} (${sliceResult['filament used [g]'] ? sliceResult['filament used [g]'][0] + 'g' : 'N/A'})`} />
-              <InfoRow label="Kích thước mô hình (mm)" value={sliceResult.model_size || 'N/A'} />
-              <InfoRow label="Chiều cao lớp (Layer)" value={sliceParam.layer_height ? `${sliceParam.layer_height} mm` : 'N/A'} />
-              <InfoRow label="Độ đặc (Infill)" value={sliceParam.fill_density ? `${sliceParam.fill_density}%` : 'N/A'} />
-              <InfoRow label="Support" value={sliceParam.enable_support ? `Có (${sliceParam.support_type || 'auto'})` : 'Không'} />
-              <InfoRow label="Brim / Skirt" value={sliceParam.brim_type || 'N/A'} />
-              <InfoRow label="Tốc độ in tối đa" value={sliceParam.travel_speed ? `${sliceParam.travel_speed} mm/s` : 'N/A'} />
-            </div>
-          </section>
-
-          <hr className="border-slate-800" />
-
-          {/* Section 3: Machine & Hardware */}
-          <section>
-            <div className="flex items-center gap-2 mb-3 text-sm font-bold text-amber-400 uppercase tracking-wider">
-              <Settings2 size={16} />
-              Cấu hình Phần cứng
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <InfoRow label="Đầu phun (Nozzle)" value={`${sliceParam.nozzle_diameter ? sliceParam.nozzle_diameter[0] + 'mm' : 'N/A'} (${sliceParam.nozzle_type || 'N/A'})`} />
-              <InfoRow label="Loại mâm in (Bed)" value={sliceParam.curr_bed_type || 'N/A'} />
-              <InfoRow label="Cấu hình máy (Profile)" value={sliceParam.printer_settings_id || 'N/A'} />
-            </div>
-          </section>
-
-        </div>
-        
-        {/* Footer */}
-        <div className="p-4 border-t border-slate-800 bg-slate-850/50 flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-xl transition-colors"
-          >
-            Đóng
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StatusBox({ icon, label, value }: { icon: React.ReactNode; label: string; value: string | number }) {
-  return (
-    <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-3 flex flex-col justify-center">
-      <div className="flex items-center gap-2 text-slate-400 mb-2 text-xs">
-        {React.cloneElement(icon as React.ReactElement, { size: 14 } as any)}
-        {label}
-      </div>
-      <div className="text-sm font-bold text-slate-100">{value}</div>
-    </div>
-  );
-}
-
-function InfoRow({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="bg-slate-800/30 rounded-lg p-2.5 px-3 flex flex-col">
-      <span className="text-[10px] text-slate-400 uppercase font-semibold mb-0.5">{label}</span>
-      <span className="text-xs text-slate-200 font-medium truncate">{value}</span>
     </div>
   );
 }

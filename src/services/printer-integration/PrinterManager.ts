@@ -1,7 +1,6 @@
 import { IPrinterProvider, PrinterStatusData } from './types';
 import prisma from '@/utils/db';
-import { BambuLabProvider } from './providers/bambulab';
-import { MoonrakerProvider } from './providers/moonraker';
+import { BambuProvider } from './providers/bambu';
 
 class PrinterManager {
   private providers: Map<string, IPrinterProvider> = new Map();
@@ -89,13 +88,10 @@ class PrinterManager {
     if (account) {
       let provider: IPrinterProvider | undefined;
 
-      if (account.provider === 'bambulab') {
-        // For HA integration, email field holds the HA URL and token holds the Long-Lived Access Token.
-        const url = account.email || 'http://192.168.99.166:8123';
-        provider = new BambuLabProvider(url, account.token);
-      } else if (account.provider === 'moonraker') {
-        const url = account.email || 'http://127.0.0.1:7125';
-        provider = new MoonrakerProvider(url);
+      if (account.provider === 'bambu') {
+        // Provider tự đọc tiếp: IP + Access Code của từng máy nằm ở bảng Printer, còn URL + token
+        // của Home Assistant (đường dự phòng) nằm ở chính dòng tài khoản này.
+        provider = new BambuProvider(accountId);
       }
 
       if (provider) {

@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { X, Plus } from 'lucide-react';
+import { KetNoiFields, type CauHinhKetNoi } from '@/components/Printer/ket-noi-fields';
 
 interface AddPrinterModalProps {
   isOpen: boolean;
@@ -14,6 +15,7 @@ export default function AddPrinterModal({ isOpen, onClose, onSuccess, prefilledI
   const [id, setId] = useState('');
   const [name, setName] = useState('');
   const [model, setModel] = useState('');
+  const [ketNoi, setKetNoi] = useState<CauHinhKetNoi>({ lanIp: '', lanAccessCode: '', lanSerial: '', cloudPrinterId: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -27,6 +29,7 @@ export default function AddPrinterModal({ isOpen, onClose, onSuccess, prefilledI
       }
       setName('');
       setModel('');
+      setKetNoi({ lanIp: '', lanAccessCode: '', lanSerial: '', cloudPrinterId: '' });
       setError('');
     }
   }, [isOpen, prefilledId]);
@@ -54,6 +57,10 @@ export default function AddPrinterModal({ isOpen, onClose, onSuccess, prefilledI
           id: finalId,
           name: name.trim(),
           model: model.trim() || undefined,
+          lanIp: ketNoi.lanIp || null,
+          lanAccessCode: ketNoi.lanAccessCode || null,
+          lanSerial: ketNoi.lanSerial || null,
+          cloudPrinterId: ketNoi.cloudPrinterId || null,
         }),
       });
 
@@ -73,7 +80,7 @@ export default function AddPrinterModal({ isOpen, onClose, onSuccess, prefilledI
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="bg-[#0f1729] border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md shadow-2xl">
+      <div className="bg-[#0f1729] border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-slate-200 dark:border-slate-800">
           <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -146,6 +153,8 @@ export default function AddPrinterModal({ isOpen, onClose, onSuccess, prefilledI
             />
           </div>
 
+          <KetNoiFields giaTri={ketNoi} onChange={setKetNoi} onChonTen={(t) => !name.trim() && setName(t)} />
+
           {/* Submit */}
           <div className="w-full h-10">
             <button
@@ -153,7 +162,7 @@ export default function AddPrinterModal({ isOpen, onClose, onSuccess, prefilledI
               disabled={loading}
               className="w-full h-full bg-indigo-650 hover:bg-indigo-600 text-slate-900 dark:text-white font-semibold rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
-              {loading ? 'Đang tạo...' : 'Tạo máy in'}
+              {loading ? 'Đang kiểm tra kết nối…' : 'Tạo máy in'}
             </button>
           </div>
         </form>

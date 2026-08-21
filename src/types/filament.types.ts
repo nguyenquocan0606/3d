@@ -21,6 +21,12 @@ export interface PrinterInput {
   name: string;
   model?: string;
   status?: 'idle' | 'printing' | 'maintenance';
+  /** Kết nối LAN trực tiếp tới máy Bambu. Bỏ trống cả ba thì máy chỉ đọc được qua Home Assistant. */
+  lanIp?: string | null;
+  lanAccessCode?: string | null;
+  lanSerial?: string | null;
+  /** ID máy in phía Home Assistant (tiền tố entity) — cũng là khóa tra cứu của provider. */
+  cloudPrinterId?: string | null;
 }
 
 export interface Printer {
@@ -28,6 +34,11 @@ export interface Printer {
   name: string;
   model: string | null;
   status: string;
+  lanIp?: string | null;
+  lanSerial?: string | null;
+  cloudPrinterId?: string | null;
+  /** Có Access Code đã lưu hay chưa. **Không bao giờ trả chính mã đó về client.** */
+  coAccessCode?: boolean;
   spools?: Spool[];
   createdAt: Date;
   updatedAt: Date;

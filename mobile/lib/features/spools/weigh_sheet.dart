@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/format/formatters.dart';
 import '../../core/scale/scale_audio.dart';
 import '../../core/scale/scale_service.dart';
+import '../../core/scan/pda_scan.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../../data/models/filament.dart';
@@ -128,8 +129,21 @@ class _WeighSheetState extends ConsumerState<WeighSheet> {
     );
     if (code == null || !context.mounted) return;
 
+    try {
+      final message = await _switchToSpool(code);
+      if (mounted && message != null) showToast(context, message);
+    } catch (error) {
+      if (mounted) showToast(context, '$error', isError: true);
+    }
+  }
+
+  /// Lưu cuộn đang cân rồi nạp cuộn vừa quét vào cùng màn hình.
+  ///
+  /// Dùng chung cho nút "Lưu & quét cuộn tiếp theo" và cho máy PDA — bóp cò ngay
+  /// trên bảng cân là chuyển cuộn, khỏi rời tay khỏi cân.
+  Future<String?> _switchToSpool(String code) async {
     final saved = await _save(silent: true);
-    if (!saved || !mounted) return;
+    if (!saved || !mounted) return null;
 
     final spools = ref.read(spoolsProvider).valueOrNull ?? const [];
     final normalized = code.replaceAll('-', '').toUpperCase();
@@ -143,8 +157,7 @@ class _WeighSheetState extends ConsumerState<WeighSheet> {
 
     final selected = next;
     if (selected == null) {
-      showToast(context, 'Không tìm thấy cuộn nhựa $code.', isError: true);
-      return;
+      throw Exception('Không tìm thấy cuộn nhựa ${code.trim()}.');
     }
 
     ref.read(scaleAudioProvider).speak('spool');
@@ -154,11 +167,15 @@ class _WeighSheetState extends ConsumerState<WeighSheet> {
       _remaining = selected.remainingWeightG;
       _totalWeighed = null;
     });
-    showToast(context, 'Đã chuyển sang cuộn ${selected.id}.');
+    return 'Đã chuyển sang cuộn ${selected.id}.';
   }
 
   @override
   Widget build(BuildContext context) {
+    return PdaScanScope(onCode: _switchToSpool, child: _buildSheet(context));
+  }
+
+  Widget _buildSheet(BuildContext context) {
     final scale = ref.watch(scaleProvider);
     final result = _computedRemaining;
 

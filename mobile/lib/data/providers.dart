@@ -3,19 +3,26 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'models/bulk_order.dart';
+import 'models/dashboard.dart';
 import 'models/filament.dart';
 import 'models/inventory.dart';
 import 'models/location.dart';
 import 'models/order.dart';
+import 'models/eshop_order.dart';
 import 'models/printer.dart';
+import 'models/printer_event.dart';
 import 'models/store.dart';
 import 'repositories/bulk_repository.dart';
+import 'repositories/dashboard_repository.dart';
 import 'repositories/filament_repository.dart';
 import 'repositories/inventory_repository.dart';
 import 'repositories/location_repository.dart';
+import 'repositories/notify_repository.dart';
 import 'repositories/printer_repository.dart';
 import 'repositories/production_repository.dart';
+import 'repositories/eshop_repository.dart';
 import 'repositories/store_repository.dart';
+import 'sync/sync_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Nhựa & cuộn nhựa
@@ -23,8 +30,13 @@ import 'repositories/store_repository.dart';
 
 class FilamentsNotifier extends AsyncNotifier<List<Filament>> {
   @override
-  Future<List<Filament>> build() =>
-      ref.watch(filamentRepositoryProvider).fetchFilaments();
+  Future<List<Filament>> build() {
+    // Đọc lại mỗi khi worker kéo về thay đổi mới. Không có dòng này thì worker
+    // ghi vào SQLite xong màn hình vẫn hiện dữ liệu cũ cho tới khi người dùng tự
+    // kéo làm mới — đúng cái làm cho đồng bộ trông như không chạy.
+    ref.watch(syncProvider.select((s) => s.phienBanDuLieu));
+    return ref.watch(filamentRepositoryProvider).fetchFilaments();
+  }
 
   Future<void> refresh() async {
     state = await AsyncValue.guard(
@@ -81,8 +93,11 @@ final dashboardStatsProvider = FutureProvider<DashboardStats>(
 
 class LocationsNotifier extends AsyncNotifier<List<StorageLocation>> {
   @override
-  Future<List<StorageLocation>> build() =>
-      ref.watch(locationRepositoryProvider).fetchLocations();
+  Future<List<StorageLocation>> build() {
+    // Đọc lại khi worker kéo về thay đổi — giống FilamentsNotifier.
+    ref.watch(syncProvider.select((s) => s.phienBanDuLieu));
+    return ref.watch(locationRepositoryProvider).fetchLocations();
+  }
 
   Future<void> refresh() async {
     state = await AsyncValue.guard(
@@ -102,7 +117,10 @@ final locationsProvider =
 
 class PrintersNotifier extends AsyncNotifier<List<Printer>> {
   @override
-  Future<List<Printer>> build() => ref.watch(printerRepositoryProvider).fetchPrinters();
+  Future<List<Printer>> build() {
+    ref.watch(syncProvider.select((s) => s.phienBanDuLieu));
+    return ref.watch(printerRepositoryProvider).fetchPrinters();
+  }
 
   Future<void> refresh() async {
     state = await AsyncValue.guard(
@@ -134,13 +152,26 @@ final livePrinterStatusProvider =
   }
 });
 
+/// Nhật ký hoạt động máy in do máy chủ ghi (nguồn của thông báo đẩy).
+///
+/// `autoDispose` + đọc lại mỗi lần mở màn: danh sách này thay đổi liên tục ở nền nên cache dài
+/// chỉ tổ hiện dữ liệu cũ. Tham số là printerId, null = mọi máy.
+final printerEventsProvider =
+    FutureProvider.autoDispose.family<List<PrinterEvent>, String?>(
+  (ref, printerId) =>
+      ref.watch(notifyRepositoryProvider).fetchSuKien(printerId: printerId),
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Sản xuất
 // ─────────────────────────────────────────────────────────────────────────────
 
 class OrdersNotifier extends AsyncNotifier<List<Order>> {
   @override
-  Future<List<Order>> build() => ref.watch(productionRepositoryProvider).fetchOrders();
+  Future<List<Order>> build() {
+    ref.watch(syncProvider.select((s) => s.phienBanDuLieu));
+    return ref.watch(productionRepositoryProvider).fetchOrders();
+  }
 
   Future<void> refresh() async {
     state = await AsyncValue.guard(
@@ -152,10 +183,50 @@ class OrdersNotifier extends AsyncNotifier<List<Order>> {
 final ordersProvider =
     AsyncNotifierProvider<OrdersNotifier, List<Order>>(OrdersNotifier.new);
 
+class EshopOrdersNotifier extends AsyncNotifier<List<EshopOrder>> {
+  @override
+  Future<List<EshopOrder>> build() => ref.watch(eshopRepositoryProvider).fetchOrders();
+
+  Future<void> refresh() async {
+    state = await AsyncValue.guard(
+      () => ref.read(eshopRepositoryProvider).fetchOrders(),
+    );
+  }
+
+  void updateLocalPickProgress(String orderId, String status, Map<String, int> pickedItems) {
+    final current = state.valueOrNull;
+    if (current == null) return;
+
+    state = AsyncValue.data([
+      for (final order in current)
+        if (order.id == orderId)
+          EshopOrder(
+            id: order.id,
+            refNo: order.refNo,
+            ecomOrderNo: order.ecomOrderNo,
+            channelName: order.channelName,
+            customerName: order.customerName,
+            partnerOrderStatus: order.partnerOrderStatus,
+            deliveryCode: order.deliveryCode,
+            pickStatus: status,
+            pickedItems: pickedItems,
+            items: order.items,
+          )
+        else
+          order,
+    ]);
+  }
+}
+
+final eshopOrdersProvider =
+    AsyncNotifierProvider<EshopOrdersNotifier, List<EshopOrder>>(EshopOrdersNotifier.new);
+
 class PrintItemsNotifier extends AsyncNotifier<List<PrintItem>> {
   @override
-  Future<List<PrintItem>> build() =>
-      ref.watch(productionRepositoryProvider).fetchPrintItems();
+  Future<List<PrintItem>> build() {
+    ref.watch(syncProvider.select((s) => s.phienBanDuLieu));
+    return ref.watch(productionRepositoryProvider).fetchPrintItems();
+  }
 
   Future<void> refresh() async {
     state = await AsyncValue.guard(
@@ -179,15 +250,31 @@ final printItemsProvider =
   PrintItemsNotifier.new,
 );
 
-final peiSheetsProvider = FutureProvider<List<PeiSheet>>(
-  (ref) => ref.watch(productionRepositoryProvider).fetchPeiSheets(),
-);
+class PeiSheetsNotifier extends AsyncNotifier<List<PeiSheet>> {
+  @override
+  Future<List<PeiSheet>> build() {
+    ref.watch(syncProvider.select((s) => s.phienBanDuLieu));
+    return ref.watch(productionRepositoryProvider).fetchPeiSheets();
+  }
+
+  Future<void> refresh() async {
+    state = await AsyncValue.guard(
+      () => ref.read(productionRepositoryProvider).fetchPeiSheets(),
+    );
+  }
+}
+
+final peiSheetsProvider =
+    AsyncNotifierProvider<PeiSheetsNotifier, List<PeiSheet>>(PeiSheetsNotifier.new);
 
 /// Đơn sản xuất số lượng lớn (SLL). Backend trả kèm toàn bộ lượt in nên màn chi
 /// tiết đọc thẳng từ đây, không cần gọi lại API.
 class BulkOrdersNotifier extends AsyncNotifier<List<BulkOrder>> {
   @override
-  Future<List<BulkOrder>> build() => ref.watch(bulkRepositoryProvider).fetchOrders();
+  Future<List<BulkOrder>> build() {
+    ref.watch(syncProvider.select((s) => s.phienBanDuLieu));
+    return ref.watch(bulkRepositoryProvider).fetchOrders();
+  }
 
   Future<void> refresh() async {
     state = await AsyncValue.guard(
@@ -220,13 +307,30 @@ class InventorySessionNotifier extends AsyncNotifier<InventorySession> {
       ref.watch(inventoryRepositoryProvider).fetchActiveSession();
 
   Future<void> refresh() async {
-    state = await AsyncValue.guard(
+    // Giữ dữ liệu cũ nếu mất mạng — không để màn hình trắng chỉ vì offline.
+    final result = await AsyncValue.guard(
       () => ref.read(inventoryRepositoryProvider).fetchActiveSession(),
     );
+    // Chỉ cập nhật state khi có dữ liệu mới hoặc state hiện tại đang lỗi.
+    if (result is! AsyncError || state is AsyncError || state is AsyncLoading) {
+      state = result;
+    }
   }
 
   Future<ScanResult> scan(String spoolId) async {
     final result = await ref.read(inventoryRepositoryProvider).scanSpool(spoolId);
+    // Cố gắng làm mới phiên — lỗi mạng được nuốt im, thao tác quét vẫn thành công.
+    try {
+      await refresh();
+    } catch (_) {}
+    return result;
+  }
+
+  /// Hoàn tác lượt quét gần nhất — quét nhầm cuộn bên cạnh là chuyện thường khi
+  /// đứng sát kệ. Ai là "gần nhất" do backend quyết theo `scannedAt` để không lệch
+  /// khi có người khác cùng kiểm trên máy khác. Bắt buộc có mạng (Nhóm B §2.2).
+  Future<ScanResult> undoLastScan() async {
+    final result = await ref.read(inventoryRepositoryProvider).unscanSpool();
     await refresh();
     return result;
   }
@@ -258,7 +362,10 @@ class StoreNotifier extends AsyncNotifier<StoreSnapshot> {
   final Set<String> _idsWithFiles = {};
 
   @override
-  Future<StoreSnapshot> build() => ref.watch(storeRepositoryProvider).fetchAll();
+  Future<StoreSnapshot> build() {
+    ref.watch(syncProvider.select((s) => s.phienBanDuLieu));
+    return ref.watch(storeRepositoryProvider).fetchAll();
+  }
 
   Future<void> refresh() async {
     _idsWithImages.clear();
@@ -288,9 +395,10 @@ class StoreNotifier extends AsyncNotifier<StoreSnapshot> {
     return files;
   }
 
-  /// Nhập / xuất / đặt lại tồn kho — ghi lịch sử bằng tiếng Việt giống bản web.
+  /// Nhập / xuất / đặt lại tồn kho — **qua hàng đợi offline** (Nhóm A).
   ///
-  /// Tồn kho combo con tính tự động từ sản phẩm mẹ nên không sửa trực tiếp được.
+  /// Server áp dụng phép cộng dồn, không phải phép gán — an toàn khi nhiều máy
+  /// cùng nhập/xuất khi mất mạng. Ghi lịch sử bằng tiếng Việt giống bản web.
   Future<void> adjustStock(
     String productId, {
     required StockAction action,
@@ -313,6 +421,13 @@ class StoreNotifier extends AsyncNotifier<StoreSnapshot> {
       StockAction.set => amount < 0 ? 0 : amount,
     };
 
+    // Delta gửi lên server: dương = nhập, âm = xuất
+    final delta = switch (action) {
+      StockAction.add => amount,
+      StockAction.subtract => -amount,
+      StockAction.set => newQuantity - product.soLuong, // best-effort offline
+    };
+
     final note = switch (action) {
       StockAction.add => 'Nhập thêm $amount, tồn kho mới $newQuantity.',
       StockAction.subtract => 'Xuất/bán $amount, tồn kho mới $newQuantity.',
@@ -333,18 +448,13 @@ class StoreNotifier extends AsyncNotifier<StoreSnapshot> {
       ],
     );
 
+    // Cập nhật trạng thái lạc quan + cache + outbox cùng lúc
     _replaceProduct(productId, (_) => updated);
-    await _sync();
-  }
-
-  Future<void> _sync() async {
-    final snapshot = state.valueOrNull;
-    if (snapshot == null) return;
-    await ref.read(storeRepositoryProvider).syncAll(
-          products: snapshot.sanPham,
-          fields: snapshot.truongRieng,
-          idsWithImages: _idsWithImages,
-          idsWithFiles: _idsWithFiles,
+    await ref.read(storeRepositoryProvider).adjustStockOutbox(
+          productId,
+          delta,
+          newQuantity,
+          note,
         );
   }
 
@@ -407,12 +517,69 @@ final storeProductsProvider = Provider<AsyncValue<List<StoreProduct>>>((ref) {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Dashboard mới (đợt 6)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Cảnh báo hiện hành — poll 30 s, dừng khi widget không còn lắng nghe.
+///
+/// Nếu API lỗi (mất mạng) thì repository trả bản cache kèm `cachedAt`; nếu
+/// cả cache cũng trống thì stream báo lỗi để UI hiện ErrorView.
+final canhBaoProvider =
+    StreamProvider.autoDispose<DashboardResult<KetQuaCanhBao>>((ref) async* {
+  final repo = ref.watch(dashboardRepositoryProvider);
+  while (true) {
+    try {
+      yield await repo.fetchCanhBao();
+    } catch (e, st) {
+      yield* Stream.error(e, st);
+      // Dừng 30 s rồi thử lại — không vòng lặp điên.
+    }
+    await Future<void>.delayed(const Duration(seconds: 30));
+  }
+});
+
+/// Tổng quan hôm nay — poll 60 s.
+final tongQuanProvider =
+    StreamProvider.autoDispose<DashboardResult<KetQuaTongQuan>>((ref) async* {
+  final repo = ref.watch(dashboardRepositoryProvider);
+  while (true) {
+    try {
+      yield await repo.fetchTongQuan();
+    } catch (e, st) {
+      yield* Stream.error(e, st);
+    }
+    await Future<void>.delayed(const Duration(seconds: 60));
+  }
+});
+
 /// Tải lại toàn bộ dữ liệu nền — dùng cho pull-to-refresh ở các màn hình chính.
+///
+/// Phải **đồng bộ trước rồi mới đọc lại**: từ khi repository đọc từ CSDL cục bộ,
+/// đọc lại mà không đồng bộ chỉ là đọc lại đúng dữ liệu cũ — thợ kéo màn hình
+/// xuống mà chẳng có gì mới, tưởng hỏng.
+///
+/// Lỗi mạng ở bước đồng bộ **không chặn** bước đọc: mất sóng thì vẫn phải hiện
+/// được dữ liệu đang có trong máy.
 Future<void> refreshCoreData(WidgetRef ref) async {
+  try {
+    await ref.read(syncProvider.notifier).dongBo();
+  } catch (_) {
+    // Đã ghi vào trạng thái đồng bộ để chỉ báo trên thanh hiện; ở đây nuốt đi.
+  }
+
   await Future.wait([
     ref.read(filamentsProvider.notifier).refresh(),
     ref.read(locationsProvider.notifier).refresh(),
     ref.read(printersProvider.notifier).refresh(),
+    ref.read(ordersProvider.notifier).refresh(),
+    ref.read(printItemsProvider.notifier).refresh(),
+    ref.read(peiSheetsProvider.notifier).refresh(),
+    ref.read(bulkOrdersProvider.notifier).refresh(),
+    ref.read(eshopOrdersProvider.notifier).refresh(),
+    ref.read(storeProvider.notifier).refresh(),
   ]);
   ref.invalidate(dashboardStatsProvider);
+  ref.invalidate(canhBaoProvider);
+  ref.invalidate(tongQuanProvider);
 }

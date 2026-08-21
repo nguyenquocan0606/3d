@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { LocationService } from '@/services/location.service';
+import { ghiBiaMo } from '@/services/sync.service';
+import { baoThayDoi } from '@/services/sync-notify.service';
 
 export async function PUT(
   request: Request,
@@ -69,6 +71,9 @@ export async function DELETE(
 
     const result = await LocationService.deleteLocation(id);
     if (result.success) {
+      await ghiBiaMo('locations', id);
+      // Cuộn trong kho không bị xóa, chỉ mất locationId (SetNull).
+      void baoThayDoi(['locations', 'spools']);
       return NextResponse.json({
         status: 'success',
         data: true,

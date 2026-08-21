@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrinterService } from '@/services/printer.service';
+import { ghiBiaMo } from '@/services/sync.service';
+import { baoThayDoi } from '@/services/sync-notify.service';
 
 /**
  * PUT /api/printers/[id] - Cập nhật thông tin máy in
@@ -14,6 +16,7 @@ export async function PUT(
     const result = await PrinterService.updatePrinter(id, body);
 
     if (result.success) {
+      void baoThayDoi(['printers']);
       return NextResponse.json({ status: 'success', data: result.data });
     }
 
@@ -40,6 +43,10 @@ export async function DELETE(
   const result = await PrinterService.deletePrinter(id);
 
   if (result.success) {
+    await ghiBiaMo('printers', id);
+    // Cuộn nhựa, miếng in và lượt in không bị xóa, chỉ mất printerId (SetNull) —
+    // app phải kéo lại chúng để bỏ liên kết tới máy đã biến mất.
+    void baoThayDoi(['printers', 'spools', 'printItems', 'bulkRuns']);
     return NextResponse.json({ status: 'success', data: true });
   }
 

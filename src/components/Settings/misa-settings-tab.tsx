@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, Braces, CheckCircle2, KeyRound, Loader2, RefreshCw, Save, ShieldCheck, XCircle } from 'lucide-react';
+import { AlertCircle, Braces, CheckCircle2, KeyRound, Loader2, LogIn, RefreshCw, Save, ShieldCheck, XCircle } from 'lucide-react';
 
 type MisaCredentialPublic = {
   hasToken: boolean;
@@ -13,13 +13,51 @@ type MisaCredentialPublic = {
   tid: string | null;
   tco: string | null;
   brid: string | null;
+  /** Môi trường MISA của tenant ("g2"/"g3") — quyết định đường dẫn API. */
+  env: string;
+  tokenExpiresAt: string | null;
   updatedAt: string | null;
   lastCheckedAt: string | null;
   lastCheckOk: boolean | null;
   lastCheckMessage: string | null;
 };
 
+/** Trạng thái phiên MISA — xem `kiemTraTrangThaiMisa` phía server. */
+type TrangThaiDangNhap = {
+  dangNhap: {
+    trangThai: 'song' | 'het-han' | 'chua-co' | 'loi';
+    message: string;
+    tenantId: string | null;
+    env: string | null;
+  };
+  bearer: { co: boolean; hetHanLuc: string | null; conLaiPhut: number | null };
+  coRefreshToken: boolean;
+  coTokenMisaId: boolean;
+  tuLoDuoc: boolean;
+  tomTat: string;
+};
+
 type ApiResponse<T> = { status?: string; data?: T; message?: string };
+
+/** Màu + chữ cho ô trạng thái đăng nhập. */
+const KIEU_DANG_NHAP: Record<TrangThaiDangNhap['dangNhap']['trangThai'], { chu: string; lop: string }> = {
+  song: {
+    chu: 'Đang đăng nhập',
+    lop: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-900',
+  },
+  'het-han': {
+    chu: 'Hết phiên',
+    lop: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-300 dark:border-red-900',
+  },
+  'chua-co': {
+    chu: 'Chưa đăng nhập',
+    lop: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+  },
+  loi: {
+    chu: 'Không kiểm tra được',
+    lop: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-900',
+  },
+};
 
 const LOP_THE = 'rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-[#111827]';
 const LOP_NHAP =
@@ -31,6 +69,28 @@ const LOP_NHAN = 'mb-1.5 block text-xs font-semibold text-slate-500 dark:text-sl
 function dinhDangThoiGian(iso: string | null) {
   if (!iso) return 'Chưa kiểm tra lần nào';
   return new Date(iso).toLocaleString('vi-VN');
+}
+
+/**
+ * Mô tả hạn token đọc từ chính JWT (claim `exp`) — token MISA sống khoảng 20,5 tiếng nên gần như
+ * ngày nào cũng phải cấp lại.
+ */
+function moTaHanToken(iso: string | null): { chu: string; mau: string } {
+  if (!iso) return { chu: 'Không đọc được hạn từ token', mau: 'text-slate-500' };
+
+  const conLaiMs = new Date(iso).getTime() - Date.now();
+  const thoiDiem = new Date(iso).toLocaleString('vi-VN');
+
+  if (conLaiMs <= 0) return { chu: `ĐÃ HẾT HẠN lúc ${thoiDiem}`, mau: 'text-red-600 dark:text-red-400 font-semibold' };
+
+  const gio = Math.floor(conLaiMs / 3600000);
+  const phut = Math.floor((conLaiMs % 3600000) / 60000);
+  const conLai = gio > 0 ? `${gio} giờ ${phut} phút` : `${phut} phút`;
+
+  return {
+    chu: `Còn ${conLai} (hết hạn ${thoiDiem})`,
+    mau: conLaiMs < 2 * 3600000 ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-emerald-600 dark:text-emerald-400',
+  };
 }
 
 /**
@@ -71,6 +131,7 @@ export default function MisaSettingsTab() {
   const [dangKiemTra, setDangKiemTra] = useState(false);
 
   const [bearerToken, setBearerToken] = useState('');
+  const [tokenMisaId, setTokenMisaId] = useState('');
   const [cookie, setCookie] = useState('');
   const [deviceId, setDeviceId] = useState('');
   const [msBid, setMsBid] = useState('');
@@ -78,8 +139,21 @@ export default function MisaSettingsTab() {
   const [tid, setTid] = useState('');
   const [tco, setTco] = useState('');
   const [brid, setBrid] = useState('');
+  const [env, setEnv] = useState('g3');
 
   const [ketQuaKiemTra, setKetQuaKiemTra] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const [trangThai, setTrangThai] = useState<TrangThaiDangNhap | null>(null);
+  const [dangSoiTrangThai, setDangSoiTrangThai] = useState(false);
+
+  // Form đăng nhập MISA 2 bước: nhập tài khoản/mật khẩu → MISA bắn OTP → nhập OTP.
+  const [taiKhoan, setTaiKhoan] = useState('');
+  const [matKhau, setMatKhau] = useState('');
+  const [otp, setOtp] = useState('');
+  const [tokenTam, setTokenTam] = useState('');
+  const [cookieTam, setCookieTam] = useState('');
+  const [dangDangNhap, setDangDangNhap] = useState(false);
+  const [thongDiepOtp, setThongDiepOtp] = useState('');
 
   const [hienNhapCookieJson, setHienNhapCookieJson] = useState(false);
   const [cookieJsonInput, setCookieJsonInput] = useState('');
@@ -98,17 +172,103 @@ export default function MisaSettingsTab() {
         setTid(data.data.tid || '');
         setTco(data.data.tco || '');
         setBrid(data.data.brid || '');
+        setEnv(data.data.env || 'g3');
       }
     } finally {
       setDangTai(false);
     }
   }, []);
 
+  /**
+   * Hỏi server xem phiên MISA còn sống không. Chỉ đọc — không đổi phiên, nên gọi thoải mái mà không
+   * sợ đá phiên eShop đang mở trên máy chính.
+   */
+  const soiTrangThai = useCallback(async () => {
+    setDangSoiTrangThai(true);
+    try {
+      const res = await fetch('/api/misa/trang-thai');
+      const data = (await res.json()) as ApiResponse<TrangThaiDangNhap>;
+      setTrangThai(data.status === 'success' && data.data ? data.data : null);
+    } catch {
+      setTrangThai(null);
+    } finally {
+      setDangSoiTrangThai(false);
+    }
+  }, []);
+
   useEffect(() => {
     queueMicrotask(() => {
       taiCredential();
+      soiTrangThai();
     });
-  }, [taiCredential]);
+  }, [taiCredential, soiTrangThai]);
+
+  const bao = (message: string, type: 'success' | 'error' | 'info') =>
+    window.dispatchEvent(new CustomEvent('appToast', { detail: { message, type } }));
+
+  /** Bước 1: gửi tài khoản/mật khẩu. Mật khẩu chỉ đi thẳng sang MISA, không được lưu lại. */
+  const dangNhapMisa = async () => {
+    setDangDangNhap(true);
+    setThongDiepOtp('');
+    try {
+      const res = await fetch('/api/misa/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userName: taiKhoan.trim(), password: matKhau }),
+      });
+      const data = (await res.json()) as ApiResponse<{ canOtp: boolean; token?: string; cookie?: string }>;
+
+      if (data.status !== 'success' || !data.data) {
+        bao(data.message || 'Đăng nhập thất bại.', 'error');
+        return;
+      }
+
+      setMatKhau(''); // không giữ mật khẩu trong bộ nhớ trình duyệt lâu hơn mức cần thiết
+
+      if (data.data.canOtp) {
+        setTokenTam(data.data.token || '');
+        setCookieTam(data.data.cookie || '');
+        setThongDiepOtp(data.message || 'Đã gửi mã OTP.');
+      } else {
+        bao(data.message || 'Đăng nhập thành công.', 'success');
+        await taiCredential();
+        await soiTrangThai();
+      }
+    } catch {
+      bao('Lỗi kết nối máy chủ.', 'error');
+    } finally {
+      setDangDangNhap(false);
+    }
+  };
+
+  /** Bước 2: gửi OTP. Xong là cookie phiên được ghi thẳng vào cấu hình MISA. */
+  const xacThucOtp = async () => {
+    setDangDangNhap(true);
+    try {
+      const res = await fetch('/api/misa/login/otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: tokenTam, otp: otp.trim(), cookie: cookieTam }),
+      });
+      const data = (await res.json()) as ApiResponse<unknown>;
+
+      if (data.status === 'success') {
+        bao(data.message || 'Đăng nhập thành công.', 'success');
+        setTokenTam('');
+        setCookieTam('');
+        setOtp('');
+        setThongDiepOtp('');
+        await taiCredential();
+        await soiTrangThai();
+      } else {
+        bao(data.message || 'Mã OTP không đúng.', 'error');
+      }
+    } catch {
+      bao('Lỗi kết nối máy chủ.', 'error');
+    } finally {
+      setDangDangNhap(false);
+    }
+  };
 
   const luuCredential = async () => {
     setDangLuu(true);
@@ -119,6 +279,7 @@ export default function MisaSettingsTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...(bearerToken.trim() ? { bearerToken: bearerToken.trim() } : {}),
+          ...(tokenMisaId.trim() ? { tokenMisaId: tokenMisaId.trim() } : {}),
           ...(cookie.trim() ? { cookie: cookie.trim() } : {}),
           deviceId,
           msBid,
@@ -126,6 +287,7 @@ export default function MisaSettingsTab() {
           tid,
           tco,
           brid,
+          env,
         }),
       });
       const data = (await res.json()) as ApiResponse<MisaCredentialPublic>;
@@ -190,17 +352,215 @@ export default function MisaSettingsTab() {
           <div>
             <h2 className="text-base font-bold">Tích hợp MISA eShop</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Bearer token hết hạn theo phiên đăng nhập MISA — khi báo hết hạn, đăng nhập lại trên trình duyệt, lấy token mới (DevTools → Network → request bất kỳ → header <code>authorization</code>) rồi dán lại đây.
+              Đăng nhập bằng tài khoản MISA ở dưới là xong — hệ thống tự lấy Bearer token và tự gia hạn về sau.
+              Các ô dán token bên dưới chỉ dùng khi cần chữa cháy.
             </p>
           </div>
         </div>
 
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-900/60">
-          <span className="font-semibold">Token hiện tại:</span>
-          <span className="font-mono text-xs text-slate-500">{credential?.hasToken ? credential.tokenPreview : 'Chưa cấu hình'}</span>
-          <span className="text-slate-300 dark:text-slate-700">|</span>
-          <span className="font-semibold">Cookie:</span>
-          <span className="text-xs text-slate-500">{credential?.hasCookie ? 'Đã lưu' : 'Chưa lưu'}</span>
+        {/* Bảng trạng thái: trả lời đúng 2 câu — "còn đăng nhập không?" và "có phải làm gì không?" */}
+        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60">
+          <div className="mb-2.5 flex flex-wrap items-center gap-2">
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold ${
+                trangThai ? KIEU_DANG_NHAP[trangThai.dangNhap.trangThai].lop : KIEU_DANG_NHAP['chua-co'].lop
+              }`}
+            >
+              {dangSoiTrangThai ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : trangThai?.dangNhap.trangThai === 'song' ? (
+                <CheckCircle2 className="size-3.5" />
+              ) : trangThai?.dangNhap.trangThai === 'het-han' ? (
+                <XCircle className="size-3.5" />
+              ) : (
+                <AlertCircle className="size-3.5" />
+              )}
+              {dangSoiTrangThai ? 'Đang kiểm tra...' : trangThai ? KIEU_DANG_NHAP[trangThai.dangNhap.trangThai].chu : 'Chưa rõ'}
+            </span>
+
+            {trangThai?.tuLoDuoc && trangThai.dangNhap.trangThai !== 'song' && (
+              <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-300">
+                Vẫn tự gia hạn được
+              </span>
+            )}
+
+            <button
+              type="button"
+              onClick={soiTrangThai}
+              disabled={dangSoiTrangThai}
+              title="Chỉ xem — không đổi phiên, không đá phiên eShop trên máy chính"
+              className="ml-auto inline-flex h-7 items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 text-xs font-semibold hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
+            >
+              <RefreshCw className={`size-3 ${dangSoiTrangThai ? 'animate-spin' : ''}`} />
+              Kiểm tra lại
+            </button>
+          </div>
+
+          {trangThai && (
+            <p className="mb-2.5 text-xs text-slate-600 dark:text-slate-300">{trangThai.tomTat}</p>
+          )}
+
+          <div className="grid gap-x-4 gap-y-1.5 text-xs sm:grid-cols-2">
+            <div className="flex gap-2">
+              <span className="font-semibold text-slate-500 dark:text-slate-400">Bearer token:</span>
+              {/* Ưu tiên số liệu vừa soi được; chưa soi xong thì tạm dùng cấu hình đã tải. */}
+              {(trangThai ? trangThai.bearer.co : credential?.hasToken) ? (
+                <span className={moTaHanToken(trangThai?.bearer.hetHanLuc ?? credential?.tokenExpiresAt ?? null).mau}>
+                  {moTaHanToken(trangThai?.bearer.hetHanLuc ?? credential?.tokenExpiresAt ?? null).chu}
+                </span>
+              ) : (
+                <span className="text-slate-500">Chưa có</span>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <span className="font-semibold text-slate-500 dark:text-slate-400">Tự gia hạn:</span>
+              <span className={trangThai?.coRefreshToken ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}>
+                {trangThai?.coRefreshToken ? 'Có refresh token' : 'Chưa có refresh token'}
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <span className="font-semibold text-slate-500 dark:text-slate-400">Cửa hàng:</span>
+              <span className="text-slate-500">
+                {trangThai?.dangNhap.tenantId
+                  ? `${trangThai.dangNhap.tenantId.slice(0, 8)}… (${trangThai.dangNhap.env ?? credential?.env})`
+                  : credential?.tid
+                    ? `${credential.tid.slice(0, 8)}… (${credential.env})`
+                    : 'Chưa xác định'}
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <span className="font-semibold text-slate-500 dark:text-slate-400">Mã token:</span>
+              <span className="font-mono text-slate-500">{credential?.tokenPreview ?? '—'}</span>
+            </div>
+          </div>
+
+          {trangThai && trangThai.dangNhap.trangThai !== 'song' && (
+            <p className="mt-2.5 border-t border-slate-200 pt-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+              {trangThai.dangNhap.message}
+            </p>
+          )}
+        </div>
+
+        {/* Đăng nhập trực tiếp — thay cho việc mở DevTools chép token bằng tay */}
+        <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50/60 p-4 dark:border-indigo-900 dark:bg-indigo-500/5">
+          <div className="mb-1 flex items-center gap-2">
+            <LogIn className="size-4 text-indigo-600 dark:text-indigo-400" />
+            <h3 className="text-sm font-bold">Đăng nhập MISA</h3>
+          </div>
+          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+            Nên dùng <strong>tài khoản phụ</strong> để không tranh phiên với máy chính. Mật khẩu chỉ được gửi thẳng sang
+            MISA, không lưu lại ở đây.
+          </p>
+
+          {!tokenTam ? (
+            <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
+              <div>
+                <label className={LOP_NHAN}>Tài khoản (SĐT hoặc email)</label>
+                <input
+                  value={taiKhoan}
+                  onChange={(event) => setTaiKhoan(event.target.value)}
+                  autoComplete="username"
+                  className={LOP_NHAP}
+                />
+              </div>
+              <div>
+                <label className={LOP_NHAN}>Mật khẩu</label>
+                <input
+                  type="password"
+                  value={matKhau}
+                  onChange={(event) => setMatKhau(event.target.value)}
+                  autoComplete="current-password"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && taiKhoan.trim() && matKhau) dangNhapMisa();
+                  }}
+                  className={LOP_NHAP}
+                />
+              </div>
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  onClick={dangNhapMisa}
+                  disabled={dangDangNhap || !taiKhoan.trim() || !matKhau}
+                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {dangDangNhap ? <Loader2 className="size-4 animate-spin" /> : <LogIn className="size-4" />}
+                  Đăng nhập
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+              <div>
+                <label className={LOP_NHAN}>Mã OTP</label>
+                <input
+                  value={otp}
+                  onChange={(event) => setOtp(event.target.value)}
+                  inputMode="numeric"
+                  placeholder="6 chữ số"
+                  autoFocus
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && otp.trim()) xacThucOtp();
+                  }}
+                  className={LOP_NHAP}
+                />
+              </div>
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  onClick={xacThucOtp}
+                  disabled={dangDangNhap || !otp.trim()}
+                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {dangDangNhap ? <Loader2 className="size-4 animate-spin" /> : null}
+                  Xác nhận
+                </button>
+              </div>
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTokenTam('');
+                    setCookieTam('');
+                    setOtp('');
+                    setThongDiepOtp('');
+                  }}
+                  className="inline-flex h-10 items-center rounded-lg border border-slate-300 px-3 text-sm dark:border-slate-700"
+                >
+                  Hủy
+                </button>
+              </div>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={async () => {
+              setDangDangNhap(true);
+              try {
+                const res = await fetch('/api/misa/refresh', { method: 'POST' });
+                const data = (await res.json()) as ApiResponse<{ ok: boolean }>;
+                bao(data.message || 'Đã gia hạn.', data.data?.ok ? 'success' : 'error');
+                await taiCredential();
+                await soiTrangThai();
+              } catch {
+                bao('Lỗi kết nối máy chủ.', 'error');
+              } finally {
+                setDangDangNhap(false);
+              }
+            }}
+            disabled={dangDangNhap}
+            title="Xin Bearer token mới bằng refresh token, hoặc đi lại chuỗi SSO bằng cookie đã lưu — không cần mật khẩu hay OTP"
+            className="mt-3 inline-flex h-9 items-center gap-2 rounded-lg border border-slate-300 px-3 text-xs font-semibold hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
+          >
+            <RefreshCw className="size-3.5" />
+            Gia hạn token ngay
+          </button>
+
+          {thongDiepOtp && (
+            <p className="mt-2 text-xs font-semibold text-indigo-700 dark:text-indigo-400">
+              {thongDiepOtp} Mã có hạn khoảng 10 phút.
+            </p>
+          )}
         </div>
 
         <div className="space-y-4">
@@ -213,6 +573,24 @@ export default function MisaSettingsTab() {
               placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
               className={LOP_TEXTAREA}
             />
+          </div>
+
+          <div>
+            <label className={LOP_NHAN}>tokenMisaId (bỏ trống nếu không đổi)</label>
+            <textarea
+              value={tokenMisaId}
+              onChange={(event) => setTokenMisaId(event.target.value)}
+              rows={3}
+              placeholder="eyJhbGciOi..."
+              className={LOP_TEXTAREA}
+            />
+            {/* Ô này giờ chỉ là phao cứu sinh. Đăng nhập ở trên đã tự đi hết chuỗi SSO của MISA để
+                lấy tokenMisaId lẫn Bearer token, nên bình thường không ai phải đụng vào đây. */}
+            <p className="mt-1.5 text-xs text-slate-500">
+              Không cần điền — đăng nhập ở trên là hệ thống tự lấy. Chỉ dùng khi MISA đổi luồng đăng nhập:
+              mở eShop trên trình duyệt → F12 → tab <b>Application</b> → <b>Local Storage</b> → chép giá trị
+              khoá <b>KeyCacheMID</b>.
+            </p>
           </div>
 
           <div>
@@ -288,6 +666,17 @@ export default function MisaSettingsTab() {
             <div>
               <label className={LOP_NHAN}>x-ems-context.brid</label>
               <input value={brid} onChange={(event) => setBrid(event.target.value)} className={LOP_NHAP} />
+            </div>
+            <div>
+              <label className={LOP_NHAN}>Môi trường (claim &quot;env&quot; trong token)</label>
+              <select value={env} onChange={(event) => setEnv(event.target.value)} className={LOP_NHAP}>
+                <option value="g3">g3</option>
+                <option value="g2">g2</option>
+              </select>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Sai môi trường thì MISA trả 401/404 dù token còn hạn. Xem trong URL request:
+                <code> /eshop/g3/api/...</code>
+              </p>
             </div>
           </div>
         </div>

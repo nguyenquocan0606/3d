@@ -70,6 +70,138 @@ export function chiaLuotIn(
   return chiaLuotInTheoMay(tongSoCon, new Array(Math.floor(soMay)).fill(soConMoiMam));
 }
 
+/** Một lượt đang có trong DB, đủ trường để tính kế hoạch chia lại. */
+export interface LuotDaCo {
+  id: string;
+  printerId: string | null;
+  seq: number;
+  peiIndex: number;
+  quantity: number;
+  status: string;
+  isRework: boolean;
+}
+
+/** Kế hoạch chia lại đơn mà không đụng vào phần đã chạy. */
+export interface KeHoachChiaLai {
+  /** Lượt bị khóa (đã quẹt hoặc lượt bù) — giữ nguyên mã, mốc giờ, số lỗi. */
+  giuNguyen: LuotDaCo[];
+  /**
+   * Lượt đã chạy được **sửa lại số con** vì sức chứa mâm cũ nhập nhầm.
+   * Chỉ có khi bật `suaLuotDaChay`; mọi thứ khác của lượt vẫn giữ nguyên.
+   */
+  suaDaChay: { id: string; quantity: number; quantityCu: number }[];
+  /** Lượt `pending` dùng lại: **giữ nguyên mã vạch**, chỉ ghi đè máy/số con/thứ tự. */
+  capNhat: {
+    id: string;
+    printerIndex: number;
+    seq: number;
+    peiIndex: number;
+    quantity: number;
+  }[];
+  /** Lượt còn thiếu — phía gọi cấp mã vạch mới cho chúng. */
+  themMoi: { printerIndex: number; seq: number; peiIndex: number; quantity: number }[];
+  /** Mã của các lượt `pending` thừa ra, xóa từ cuối danh sách. */
+  xoa: string[];
+  /** Số con đã nằm trong các lượt bị khóa (phần kế hoạch cũ không lấy lại được). */
+  daKhoa: number;
+}
+
+/**
+ * Chia lại đơn nhưng **giữ nguyên phần đã chạy**.
+ *
+ * Chia lại kiểu xóa sạch làm mất hết mốc check-in/check-out và biến tem đã dán trên
+ * máy thành rác. Ở đây chỉ phần chưa ai đụng tới mới bị tính lại:
+ *
+ * - Lượt đã quẹt (`printing`/`completed`) và lượt in bù bị **khóa**: số con, máy,
+ *   mốc giờ, số miếng lỗi giữ nguyên. Số con của chúng được trừ vào tổng mới.
+ * - Phần còn lại chia lại từ đầu theo sức chứa mâm mới, rồi **ghép vào các mã vạch
+ *   `pending` đang có theo thứ tự `seq`** — mã cũ vẫn dùng được, không phải in lại tem.
+ * - Thừa mã thì xóa từ cuối, thiếu mã thì phía gọi cấp thêm mã mới.
+ *
+ * `peiIndex` của lượt mới đếm tiếp sau số PEI lớn nhất đang có trên chính máy đó, để
+ * không trùng số với mâm đang dán trên máy.
+ *
+ * `suaLuotDaChay` (mặc định bật) xử lý trường hợp **nhập nhầm sức chứa mâm**: máy A khai
+ * 34 nhưng thật ra mâm xếp được 35 con. Khi đó những mâm ĐẦY đã in trên máy A cũng phải
+ * đổi 34 → 35, nếu không tổng số con của đơn đếm sai. Chỉ mâm đầy mới đổi — mâm lẻ cuối
+ * và lượt in bù vốn không xếp đầy mâm nên giữ nguyên.
+ */
+export function chiaLaiGiuTienDo(
+  runs: LuotDaCo[],
+  tongMoi: number,
+  printerIds: string[],
+  sucChuaMoiMay: number[],
+  suaLuotDaChay = true
+): KeHoachChiaLai {
+  const khoa = runs.filter((r) => r.isRework || r.status !== 'pending');
+  const thayDuoc = runs
+    .filter((r) => !r.isRework && r.status === 'pending')
+    .sort((a, b) => a.seq - b.seq);
+
+  // Sức chứa mâm CŨ của từng máy = lượt đầy nhất của máy đó (lượt cuối có thể lẻ).
+  const sucChuaCu = new Map<string, number>();
+  for (const run of runs) {
+    if (!run.printerId || run.isRework) continue;
+    sucChuaCu.set(run.printerId, Math.max(sucChuaCu.get(run.printerId) ?? 0, run.quantity));
+  }
+  const sucChuaMoi = new Map<string, number>();
+  printerIds.forEach((id, i) => sucChuaMoi.set(id, sucChuaMoiMay[i]));
+
+  // Mâm lẻ cuối cùng của toàn bộ đơn (trước khi chia lại)
+  const seqMaxToanDon = runs.reduce((max, r) => Math.max(max, r.seq), 0);
+
+  /** Số con của lượt đã chạy sau khi sửa nhầm (không bật thì giữ nguyên). */
+  const soConSauSua = (run: LuotDaCo): number => {
+    if (!suaLuotDaChay || run.isRework || !run.printerId) return run.quantity;
+    const cu = sucChuaCu.get(run.printerId);
+    const moi = sucChuaMoi.get(run.printerId);
+    if (!moi || !cu) return run.quantity;
+
+    // Nhận diện "mâm đầy" (được phép sửa số con):
+    // 1. Số con bằng đúng sức chứa max của đợt trước (cu) -> là mâm đầy chuẩn.
+    // 2. HOẶC nó KHÔNG phải mâm cuối cùng của đơn (seq < seqMaxToanDon) -> mặc định các mâm ở giữa đều là mâm đầy.
+    // Điều này giúp bắt được các mâm 34 con (trong khi max là 35) do bị pha trộn giữa các lần chia.
+    const laMamDay = run.quantity === cu || run.seq < seqMaxToanDon;
+    if (!laMamDay) return run.quantity;
+    
+    return moi;
+  };
+
+  const suaDaChay = khoa
+    .map((r) => ({ id: r.id, quantity: soConSauSua(r), quantityCu: r.quantity }))
+    .filter((s) => s.quantity !== s.quantityCu);
+
+  // Lượt bù không nằm trong kế hoạch gốc nên không trừ vào tổng số con của đơn.
+  const daKhoa = khoa.filter((r) => !r.isRework).reduce((s, r) => s + soConSauSua(r), 0);
+  const conLai = Math.max(0, Math.floor(tongMoi) - daKhoa);
+
+  const seqMax = khoa.reduce((max, r) => Math.max(max, r.seq), 0);
+  const peiMax = new Map<string, number>();
+  for (const run of khoa) {
+    if (!run.printerId) continue;
+    peiMax.set(run.printerId, Math.max(peiMax.get(run.printerId) ?? 0, run.peiIndex));
+  }
+
+  const luots = chiaLuotInTheoMay(conLai, sucChuaMoiMay);
+  const canhLai = luots.map((luot) => ({
+    printerIndex: luot.printerIndex,
+    seq: seqMax + luot.seq,
+    peiIndex: (peiMax.get(printerIds[luot.printerIndex]) ?? 0) + luot.peiIndex,
+    quantity: luot.quantity,
+  }));
+
+  return {
+    giuNguyen: khoa,
+    suaDaChay,
+    capNhat: canhLai
+      .slice(0, thayDuoc.length)
+      .map((l, i) => ({ ...l, id: thayDuoc[i].id })),
+    themMoi: canhLai.slice(thayDuoc.length),
+    xoa: thayDuoc.slice(canhLai.length).map((r) => r.id),
+    daKhoa,
+  };
+}
+
 /**
  * Suy trạng thái đơn từ trạng thái các lượt: xong hết là `completed`, còn lại chỉ cần 1 lượt đã
  * động vào (đang in / đã xong) là `printing`.

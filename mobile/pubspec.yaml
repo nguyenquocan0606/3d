@@ -26,6 +26,19 @@ dependencies:
   # Lưu cấu hình (base URL, offset cân...)
   shared_preferences: ^2.3.3
 
+  # CSDL cục bộ: bản sao dữ liệu đọc + hàng đợi thao tác khi mất mạng.
+  # Dùng sqflite (SQL viết tay) chứ không phải drift — drift cần build_runner,
+  # trái với nguyên tắc "không code generation" của dự án (xem README §5).
+  sqflite: ^2.4.1
+  path: ^1.9.0
+
+  # Sinh uuid cho mỗi thao tác trong hàng đợi — đây là khóa chống gửi trùng,
+  # bắt buộc phải sinh ở máy chứ không phải server cấp.
+  uuid: ^4.5.1
+
+  # Biết máy đang có mạng hay không để quyết định lúc nào đẩy hàng đợi.
+  connectivity_plus: ^6.1.0
+
   # Quét QR / Barcode bằng camera (ML Kit)
   mobile_scanner: ^5.2.3
 
@@ -37,6 +50,16 @@ dependencies:
 
   # Đọc số khi cân (assets/audio/*.mp3 lấy từ public/audio của bản web)
   audioplayers: ^6.1.0
+
+  # Thông báo đẩy về hoạt động máy in.
+  # firebase_core + firebase_messaging: nhận push kể cả khi app đã tắt hẳn — đây là lý do duy nhất
+  # dùng Firebase, mọi thứ khác vẫn nói chuyện thẳng với máy chủ xưởng.
+  # Cần đặt android/app/google-services.json (và ios/Runner/GoogleService-Info.plist) lấy từ
+  # Firebase Console; thiếu file thì app vẫn chạy bình thường, chỉ không có push.
+  firebase_core: ^3.8.0
+  firebase_messaging: ^15.1.5
+  # Android không tự hiện thông báo khi app đang mở, phải tự dựng.
+  flutter_local_notifications: ^18.0.1
 
   cupertino_icons: ^1.0.8
 

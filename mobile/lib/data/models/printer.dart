@@ -35,31 +35,48 @@ enum LiveState {
       );
 }
 
-/// Tài khoản cloud — API **không bao giờ trả field `token`** về client.
-class CloudAccount {
-  const CloudAccount({
-    required this.id,
-    required this.provider,
-    this.email,
-    this.isActive = true,
+/// Nguồn dữ liệu đang dùng cho một máy in.
+enum NguonDuLieu {
+  mqtt('mqtt', 'MQTT trực tiếp'),
+  ha('ha', 'Qua Home Assistant'),
+  mat('mat', 'Mất kết nối');
+
+  const NguonDuLieu(this.value, this.label);
+  final String value;
+  final String label;
+
+  static NguonDuLieu from(String? raw) => NguonDuLieu.values.firstWhere(
+        (e) => e.value == raw,
+        orElse: () => NguonDuLieu.mat,
+      );
+}
+
+/// Một lỗi HMS máy đang báo. **Không sinh thông báo** — chỉ hiện ra để người sửa máy biết đường mò.
+class LoiHms {
+  const LoiHms({
+    required this.ma,
+    required this.mucDo,
+    required this.nang,
+    required this.wiki,
+    this.moTa,
   });
 
-  final String id;
-  final String provider; // bambulab | moonraker
-  final String? email; // thực chất là URL (HA hoặc Moonraker)
-  final bool isActive;
+  final String ma;
+  final String mucDo;
 
-  String get providerLabel => switch (provider) {
-        'bambulab' => 'Bambu Lab (Home Assistant)',
-        'moonraker' => 'Moonraker / Klipper',
-        _ => provider,
-      };
+  /// Nặng = fatal/serious. Chỉ dùng để xếp thứ tự và tô màu.
+  final bool nang;
+  final String wiki;
 
-  factory CloudAccount.fromJson(Map<String, dynamic> json) => CloudAccount(
-        id: asString(json['id']),
-        provider: asString(json['provider']),
-        email: asStringOrNull(json['email']),
-        isActive: asBool(json['isActive'], true),
+  /// Mô tả tiếng Anh của Bambu. Chỉ có khi dữ liệu đi đường Home Assistant.
+  final String? moTa;
+
+  factory LoiHms.fromJson(Map<String, dynamic> json) => LoiHms(
+        ma: asString(json['ma']),
+        mucDo: asString(json['mucDo']),
+        nang: asBool(json['nang']),
+        wiki: asString(json['wiki']),
+        moTa: asStringOrNull(json['moTa']),
       );
 }
 
@@ -71,7 +88,9 @@ class Printer {
     this.model,
     this.cloudAccountId,
     this.cloudPrinterId,
-    this.cloudAccount,
+    this.lanIp,
+    this.lanSerial,
+    this.coAccessCode = false,
     this.spools = const [],
     this.activeTask,
   });
@@ -82,7 +101,11 @@ class Printer {
   final String? model;
   final String? cloudAccountId;
   final String? cloudPrinterId;
-  final CloudAccount? cloudAccount;
+  final String? lanIp;
+  final String? lanSerial;
+
+  /// Máy chủ **không bao giờ** trả Access Code về client — chỉ cho biết đã lưu hay chưa.
+  final bool coAccessCode;
   final List<Spool> spools;
 
   /// Backend chỉ include 1 task `status = printing` mới nhất.
@@ -90,11 +113,14 @@ class Printer {
 
   bool get isCloudLinked => cloudAccountId != null && cloudAccountId!.isNotEmpty;
 
+  /// Đủ ba thứ mới nối thẳng MQTT được; thiếu thì máy chỉ đọc qua Home Assistant.
+  bool get coKetNoiTrucTiep =>
+      (lanIp?.isNotEmpty ?? false) && (lanSerial?.isNotEmpty ?? false) && coAccessCode;
+
   factory Printer.fromJson(Map<String, dynamic> json) {
     final name = asString(json['name']);
     final id = asString(json['id']);
     final tasks = asMapList(json['tasks']);
-    final account = json['cloudAccount'];
 
     return Printer(
       id: id,
@@ -103,7 +129,9 @@ class Printer {
       model: asStringOrNull(json['model']),
       cloudAccountId: asStringOrNull(json['cloudAccountId']),
       cloudPrinterId: asStringOrNull(json['cloudPrinterId']),
-      cloudAccount: account is Map ? CloudAccount.fromJson(asMap(account)) : null,
+      lanIp: asStringOrNull(json['lanIp']),
+      lanSerial: asStringOrNull(json['lanSerial']),
+      coAccessCode: asBool(json['coAccessCode']),
       spools: asMapList(json['spools'])
           .map((raw) => Spool.fromJson(raw).copyWith(printerId: id, printerName: name))
           .toList(),
@@ -164,6 +192,34 @@ class PrinterLiveStatus {
   int? get currentLayer => asIntOrNull(payload['layer_num']);
   int? get totalLayers => asIntOrNull(payload['total_layers']);
 
+  /// Dữ liệu đang lấy từ đâu — MQTT thẳng tới máy, hay mượn Home Assistant.
+  NguonDuLieu get nguon => NguonDuLieu.from(asStringOrNull(payload['nguon']));
+
+  /// Máy có cấu hình MQTT nhưng đang phải chạy đường dự phòng — cái này đáng để ý.
+  bool get mqttRoi => asBool(payload['mqtt_roi']);
+
+  /// Lý do máy dừng, VD "tắc đầu phun". null nghĩa là không phải đang dừng.
+  String? get lyDoDung => asStringOrNull(payload['ly_do_dung']);
+
+  /// Dừng do hỏng hóc (true) hay do người/G-code chủ động (false).
+  bool get dungDoSuCo => asBool(payload['dung_do_su_co']);
+
+  String? get maLoiIn => asStringOrNull(payload['print_error']);
+
+  /// Toàn bộ lỗi HMS máy đang báo, nặng xếp trước.
+  List<LoiHms> get loiHms => asList(payload['hms'], LoiHms.fromJson);
+
+  /// URL ảnh preview đã ghép đủ để `Image.network` tải được.
+  ///
+  /// Ảnh lấy thẳng từ máy in đi qua một route của máy chủ nên backend trả đường dẫn **tương đối**;
+  /// còn ảnh từ Home Assistant vốn đã là URL tuyệt đối. Nhận cả hai dạng.
+  String? anhDayDu(String baseUrl) {
+    final u = previewUrl;
+    if (u == null || u.isEmpty) return null;
+    if (u.startsWith('http://') || u.startsWith('https://')) return u;
+    return '${baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl}$u';
+  }
+
   factory PrinterLiveStatus.fromJson(Map<String, dynamic> json) {
     final rawMaterials = json['materials'];
     final materials = <AmsTray?>[];
@@ -189,25 +245,29 @@ class PrinterLiveStatus {
   }
 }
 
-/// Máy in tìm thấy trên cloud khi login/discover, kèm thông tin đã ghép hay chưa.
-class DiscoveredCloudPrinter {
-  const DiscoveredCloudPrinter({
-    required this.id,
-    required this.name,
-    this.model,
-    this.linkedLocalId,
+/// Một máy in mà Home Assistant nhìn thấy — dùng để tự điền form thêm/sửa.
+/// HA cho sẵn IP và serial, nhưng **không** có Access Code (nằm trong config entry, không thành
+/// entity) nên ô đó vẫn phải gõ từ màn hình máy in.
+class GoiYTuHa {
+  const GoiYTuHa({
+    required this.haId,
+    required this.ten,
+    required this.daGhep,
+    this.ip,
+    this.serial,
   });
 
-  final String id;
-  final String name;
-  final String? model;
-  final String? linkedLocalId;
+  final String haId;
+  final String ten;
+  final bool daGhep;
+  final String? ip;
+  final String? serial;
 
-  factory DiscoveredCloudPrinter.fromJson(Map<String, dynamic> json) =>
-      DiscoveredCloudPrinter(
-        id: asString(json['id']),
-        name: asString(json['name']),
-        model: asStringOrNull(json['model']),
-        linkedLocalId: asStringOrNull(json['linkedLocalId']),
+  factory GoiYTuHa.fromJson(Map<String, dynamic> json) => GoiYTuHa(
+        haId: asString(json['haId']),
+        ten: asString(json['ten']),
+        daGhep: asBool(json['daGhep']),
+        ip: asStringOrNull(json['ip']),
+        serial: asStringOrNull(json['serial']),
       );
 }

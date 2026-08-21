@@ -1,38 +1,70 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/api_client.dart';
+import '../local/cache_reader.dart';
 import '../models/json.dart';
 import '../models/printer.dart';
+import '../sync/sync_service.dart';
 
 class PrinterRepository {
-  PrinterRepository(this._api);
+  PrinterRepository(this._api, this._cache);
 
   final ApiClient _api;
+  final CacheReader _cache;
 
-  Future<List<Printer>> fetchPrinters() =>
-      _api.get('/api/printers', (data) => asList(data, Printer.fromJson));
+  /// Đọc danh sách máy in từ **CSDL cục bộ** — không gọi mạng.
+  Future<List<Printer>> fetchPrinters() async =>
+      (await _cache.printersKemCuon()).map(Printer.fromJson).toList();
 
+  /// Máy chủ **dò MQTT thật** trước khi lưu nếu có đủ IP + Access Code + ID máy, nên lời gọi này
+  /// có thể mất tới ~15 giây. Sai Access Code sẽ trả lỗi ngay thay vì im lặng chấp nhận.
   Future<void> createPrinter({
     required String id,
     required String name,
     String? model,
+    String? lanIp,
+    String? lanAccessCode,
+    String? lanSerial,
+    String? cloudPrinterId,
   }) =>
       _api.post<void>(
         '/api/printers',
         (_) {},
-        body: compact({'id': id, 'name': name, 'model': model}),
+        body: compact({
+          'id': id,
+          'name': name,
+          'model': model,
+          'lanIp': lanIp,
+          'lanAccessCode': lanAccessCode,
+          'lanSerial': lanSerial,
+          'cloudPrinterId': cloudPrinterId,
+        }),
       );
 
+  /// `lanAccessCode` để null nghĩa là **giữ mã cũ** — máy chủ không trả mã đã lưu về nên không thể
+  /// điền sẵn vào ô, bắt gõ lại mỗi lần sửa tên máy thì quá phiền.
   Future<void> updatePrinter(
     String id, {
     String? name,
     String? model,
     String? status,
+    String? lanIp,
+    String? lanAccessCode,
+    String? lanSerial,
+    String? cloudPrinterId,
   }) =>
       _api.put<void>(
         '/api/printers/$id',
         (_) {},
-        body: compact({'name': name, 'model': model, 'status': status}),
+        body: compact({
+          'name': name,
+          'model': model,
+          'status': status,
+          'lanIp': lanIp,
+          'lanAccessCode': lanAccessCode,
+          'lanSerial': lanSerial,
+          'cloudPrinterId': cloudPrinterId,
+        }),
       );
 
   Future<void> deletePrinter(String id) =>
@@ -88,19 +120,16 @@ class PrinterRepository {
   Future<void> syncAms(String printerId, List<Map<String, dynamic>> spools) =>
       sendCommand(printerId, 'sync-ams', value: {'spools': spools});
 
-  Future<List<CloudAccount>> fetchCloudAccounts() => _api.get(
-        '/api/printers/cloud/accounts',
-        (data) => asList(data, CloudAccount.fromJson),
-      );
-
-  Future<List<DiscoveredCloudPrinter>> discover(String accountId) => _api.get(
-        '/api/printers/cloud/discover',
-        (data) =>
-            asList(asMap(data)['cloudPrinters'], DiscoveredCloudPrinter.fromJson),
-        query: {'accountId': accountId},
+  /// Danh sách máy Home Assistant nhìn thấy, để form tự điền IP và ID máy.
+  Future<List<GoiYTuHa>> goiYTuHa() => _api.get(
+        '/api/printers/ha-goi-y',
+        (data) => asList(data, GoiYTuHa.fromJson),
       );
 }
 
 final printerRepositoryProvider = Provider<PrinterRepository>(
-  (ref) => PrinterRepository(ref.watch(apiClientProvider)),
+  (ref) => PrinterRepository(
+    ref.watch(apiClientProvider),
+    ref.watch(cacheReaderProvider),
+  ),
 );

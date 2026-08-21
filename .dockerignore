@@ -1,0 +1,10 @@
+# Giữ context build nhỏ — Dockerfile.zalo-worker chỉ cần package*.json, prisma/ và scripts/.
+node_modules
+.next
+.git
+data
+public
+src
+mobile
+*.log
+.env

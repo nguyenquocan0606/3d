@@ -6,14 +6,17 @@ import 'features/bulk/bulk_order_detail_screen.dart';
 import 'features/bulk/bulk_orders_screen.dart';
 import 'features/bulk/create_bulk_order_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
+import 'features/eshop/eshop_order_detail_screen.dart';
 import 'features/inventory/inventory_screen.dart';
 import 'features/jobs/create_job_screen.dart';
 import 'features/jobs/print_history_screen.dart';
 import 'features/labels/labels_screen.dart';
 import 'features/labels/qr_commands_screen.dart';
 import 'features/locations/locations_screen.dart';
+import 'features/notifications/printer_events_screen.dart';
 import 'features/printers/printer_detail_screen.dart';
 import 'features/printers/printers_screen.dart';
+import 'features/printers/tuong_camera_screen.dart';
 import 'features/production/order_check_screen.dart';
 import 'features/production/order_detail_screen.dart';
 import 'features/production/pei_screen.dart';
@@ -29,6 +32,7 @@ import 'features/spools/spool_detail_screen.dart';
 import 'features/spools/spools_screen.dart';
 import 'features/store/store_detail_screen.dart';
 import 'features/store/store_screen.dart';
+import 'features/sync/pending_actions_screen.dart';
 
 final _rootKey = GlobalKey<NavigatorState>();
 
@@ -110,6 +114,10 @@ final appRouter = GoRouter(
       builder: (context, state) => const LabelsScreen(),
     ),
     GoRoute(
+      path: Routes.cameras,
+      builder: (context, state) => const TuongCameraScreen(),
+    ),
+    GoRoute(
       path: Routes.qrCommands,
       builder: (context, state) => const QrCommandsScreen(),
     ),
@@ -142,8 +150,17 @@ final appRouter = GoRouter(
       builder: (context, state) => const CreateBulkOrderScreen(),
     ),
     GoRoute(
+      path: Routes.printerEvents,
+      builder: (context, state) =>
+          PrinterEventsScreen(printerId: state.uri.queryParameters['printerId']),
+    ),
+    GoRoute(
       path: Routes.settings,
       builder: (context, state) => const SettingsScreen(),
+    ),
+    GoRoute(
+      path: Routes.pendingSync,
+      builder: (context, state) => const PendingActionsScreen(),
     ),
 
     // ── Màn chi tiết ──
@@ -178,6 +195,10 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/bulk-order/:id',
       builder: (context, state) => BulkOrderDetailScreen(orderId: _param(state)),
+    ),
+    GoRoute(
+      path: '/eshop-order/:id',
+      builder: (context, state) => EshopOrderDetailScreen(orderId: _param(state)),
     ),
   ],
 );

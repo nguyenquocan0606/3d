@@ -35,8 +35,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: 'error', message: 'Lệnh cấu hình không được hỗ trợ bởi thiết bị hoặc nhà cung cấp này.' }, { status: 400 });
     }
 
-  } catch (error: any) {
+  } catch (error) {
     console.error('Lỗi khi set filament:', error);
-    return NextResponse.json({ status: 'error', message: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Lỗi server';
+    return NextResponse.json({ status: 'error', message }, { status: 500 });
   }
 }

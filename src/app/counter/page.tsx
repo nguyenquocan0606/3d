@@ -95,12 +95,20 @@ export default function CounterPage() {
         &larr; Quay lại
       </Link>
 
-      <Link
-        href="/counter/camera"
-        className="absolute top-6 right-6 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
-      >
-        <Camera size={18} /> Đếm bằng camera
-      </Link>
+      <div className="absolute top-6 right-6 flex items-center gap-3">
+        <Link
+          href="/counter/tray"
+          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+        >
+          <Camera size={18} /> Đếm trên khay
+        </Link>
+        <Link
+          href="/counter/camera"
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+        >
+          <Camera size={18} /> Đếm bằng camera
+        </Link>
+      </div>
 
       <div className="max-w-2xl w-full flex flex-col items-center">
         <h1 className="text-4xl font-bold tracking-tight text-white mb-2">BỘ ĐẾM</h1>

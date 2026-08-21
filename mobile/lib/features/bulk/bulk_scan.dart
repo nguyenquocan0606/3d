@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/format/formatters.dart';
 import '../../core/scan/code_normalizer.dart';
+import '../../core/scan/pda_scan.dart';
 import '../../core/scan/scan_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
@@ -11,6 +12,7 @@ import '../../data/models/bulk_order.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/bulk_repository.dart';
 import '../scanner/scanner_screen.dart';
+import 'bulk_run_sheet.dart';
 
 /// Quẹt lượt in SLL.
 ///
@@ -19,10 +21,13 @@ import '../scanner/scanner_screen.dart';
 /// quẹt tem máy nào thì lượt được gán về đúng máy đó — có vậy bảng lịch sử mới
 /// nói đúng máy nào in cái gì. Chốt in xong thì chỉ cần quẹt mã lượt, vì máy đã
 /// chốt từ lúc bắt đầu.
-Future<String> startBulkRun(WidgetRef ref, String runId, String printerId) async {
+///
+/// Thao tác đi qua **hàng đợi offline** — nên phản hồi ngay dù đang mất mạng.
+Future<String> startBulkRun(WidgetRef ref, BulkRun run, String printerId) async {
   final result = await ref
       .read(bulkRepositoryProvider)
-      .scanRun(runId, printerId: printerId);
+      .checkInRun(run, printerId);
+  // Làm mới danh sách ngay — cache đã được vá lạc quan, chỉ cần đọc lại.
   await ref.read(bulkOrdersProvider.notifier).refresh();
   return bulkScanMessage(result);
 }
@@ -30,12 +35,12 @@ Future<String> startBulkRun(WidgetRef ref, String runId, String printerId) async
 /// Chốt in xong — không cần quẹt máy, nhưng có thể kèm số con lỗi của mâm.
 Future<String> finishBulkRun(
   WidgetRef ref,
-  String runId, {
+  BulkRun run, {
   int defectQuantity = 0,
 }) async {
   final result = await ref
       .read(bulkRepositoryProvider)
-      .scanRun(runId, defectQuantity: defectQuantity);
+      .checkOutRun(run, defectQuantity: defectQuantity);
   await ref.read(bulkOrdersProvider.notifier).refresh();
   return bulkScanMessage(result);
 }
@@ -53,7 +58,7 @@ Future<String?> finishBulkRunWithDefects(
 ) async {
   final defects = await askDefectQuantity(context, run);
   if (defects == null) return null;
-  return finishBulkRun(ref, run.id, defectQuantity: defects);
+  return finishBulkRun(ref, run, defectQuantity: defects);
 }
 
 /// Bảng hỏi số miếng lỗi. Trả về số lỗi (0 = không lỗi), null nếu bỏ qua.
@@ -222,7 +227,7 @@ Future<String?> startBulkRunByScanningPrinter(
   if (printerId == null) {
     throw ScanFailure('"$code" không phải mã máy in. Lượt vẫn đang chờ in.');
   }
-  return startBulkRun(ref, run.id, printerId);
+  return startBulkRun(ref, run, printerId);
 }
 
 String? _printerIdFrom(WidgetRef ref, String code) {
@@ -232,69 +237,53 @@ String? _printerIdFrom(WidgetRef ref, String code) {
 
 /// Mở máy quét liên tục cho luồng quẹt lượt in.
 Future<void> openBulkRunScanner(BuildContext context, WidgetRef ref) {
-  final session = BulkRunScanSession();
   return Navigator.of(context).push<void>(
     MaterialPageRoute(
       builder: (scanContext) => ScannerScreen(
         title: 'Quẹt mã lượt in',
-        hint: 'Bắt đầu in: quét mã lượt rồi quét tem máy in · In xong: quét mã lượt',
+        hint: 'Quét mã lượt để xem chi tiết và thao tác',
         continuous: true,
-        onCode: (code) => session.handle(scanContext, ref, code),
+        onCode: (code) => handleBulkRunScan(scanContext, ref, code),
       ),
     ),
   );
 }
 
-/// Phiên quẹt liên tục ở các màn Đơn SLL.
+/// Bọc màn Đơn SLL để máy PDA quẹt được lượt in ngay tại chỗ, khỏi mở màn quét.
 ///
-/// Giữ trạng thái giữa hai lần quét: quét mã lượt đang chờ in xong thì phiên
-/// "đang đợi mã máy in", quét tiếp tem máy mới thật sự bắt đầu.
-class BulkRunScanSession {
-  String? _runId;
-  String? _runLabel;
+/// Không cần giữ state nữa: bảng chi tiết mở ra sau cú quẹt đầu tự lo phần chờ tem máy in.
+class BulkRunPdaScope extends ConsumerWidget {
+  const BulkRunPdaScope({super.key, required this.child});
 
-  bool get waitingForPrinter => _runId != null;
+  final Widget child;
 
-  Future<String?> handle(
-    BuildContext context,
-    WidgetRef ref,
-    String rawCode,
-  ) async {
-    final code = rawCode.trim();
-
-    if (_runId != null) {
-      final printerId = _printerIdFrom(ref, code);
-      if (printerId == null) {
-        throw ScanFailure(
-          'Cần quét tem MÁY IN để bắt đầu lượt $_runLabel.\n'
-          'Quét lại mã lượt nếu muốn bỏ qua.',
-        );
-      }
-      final runId = _runId!;
-      _runId = null;
-      _runLabel = null;
-      return startBulkRun(ref, runId, printerId);
-    }
-
-    final run = await findBulkRun(ref, code);
-    if (run == null) {
-      throw ScanFailure('Không tìm thấy lượt in mã $code.');
-    }
-
-    switch (run.status) {
-      case BulkStatus.pending:
-        _runId = run.id;
-        _runLabel = 'PEI ${run.peiIndex}';
-        return 'Lượt PEI ${run.peiIndex} (${run.quantity} con) — '
-            'quét tiếp tem MÁY IN để bắt đầu.';
-      case BulkStatus.printing:
-        if (!context.mounted) return null;
-        return finishBulkRunWithDefects(context, ref, run);
-      case BulkStatus.completed:
-        throw ScanFailure(
-          'Lượt ${run.printerName} · PEI ${run.peiIndex} đã in xong lúc '
-          '${Fmt.dateTime(run.finishedAt)}.',
-        );
-    }
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return PdaScanScope(
+      onCode: (code) => handleBulkRunScan(context, ref, code),
+      child: child,
+    );
   }
+}
+
+/// Xử lý một mã lượt in vừa quẹt: mở bảng chi tiết.
+///
+/// Trước đây chỗ này là một máy trạng thái hai bước (quẹt mã lượt → nhớ lại → quẹt tem máy in).
+/// Giờ bảng chi tiết giữ luôn trạng thái đó, mà lại còn bày ra mọi thông tin của mã và đúng những
+/// nút dùng được — nên phần nhớ tạm ở đây không còn lý do tồn tại.
+///
+/// Bảng có bọc `PdaScanScope` nên máy PDA vẫn quẹt tem máy in bằng phím cứng như cũ, không phải
+/// chạm màn hình lần nào.
+Future<String?> handleBulkRunScan(
+  BuildContext context,
+  WidgetRef ref,
+  String rawCode, {
+  void Function(String route)? onOpen,
+}) async {
+  final run = await findBulkRun(ref, rawCode.trim());
+  if (run == null) {
+    throw ScanFailure('Không tìm thấy lượt in mã ${rawCode.trim()}.');
+  }
+  if (!context.mounted) return null;
+  return showBulkRunSheet(context, ref, run, onOpen: onOpen);
 }

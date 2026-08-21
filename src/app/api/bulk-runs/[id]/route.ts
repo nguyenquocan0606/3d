@@ -9,7 +9,7 @@ import { trangThaiDon } from '@/utils/bulk-production';
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const { status, printerId, quantity, startedAt, finishedAt } = await req.json();
+    const { status, printerId, quantity, startedAt, finishedAt, verifiedAt } = await req.json();
 
     const hienTai = await prisma.bulkRun.findUnique({ where: { id } });
     if (!hienTai) return fail('Không tìm thấy lượt in', 404);
@@ -22,6 +22,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
 
     const xoaMocThoiGian = status === 'pending';
+    // Lượt quay về "chưa in xong" thì lần kiểm hàng cũ không còn nói về mâm nào cả.
+    const xoaMocKiem = status !== undefined && status !== 'completed';
 
     const run = await prisma.bulkRun.update({
       where: { id },
@@ -30,6 +32,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         ...(printerId !== undefined && { printerId: printerId || null }),
         ...(printerName !== undefined && { printerName }),
         ...(quantity !== undefined && { quantity: Math.max(0, Math.floor(Number(quantity))) }),
+        ...(xoaMocKiem
+          ? { verifiedAt: null }
+          : verifiedAt !== undefined && { verifiedAt: verifiedAt ? new Date(verifiedAt) : null }),
         ...(xoaMocThoiGian
           ? { startedAt: null, finishedAt: null }
           : {

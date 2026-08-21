@@ -13,44 +13,58 @@ model Location {
   spools    Spool[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
 }
 
 model Filament {
   id        String   @id @default(uuid())
-  type      String   // PLA, PETG, ABS, TPU...
-  colorName String   // Đỏ, Đen, Trắng...
-  colorHex  String?  // Mã màu hex hiển thị lên UI (e.g. #FF0000)
-  brand     String?  // Hãng sản xuất (e.g. eSun, Creality)
+  type      String // PLA, PETG, ABS, TPU...
+  colorName String // Đỏ, Đen, Trắng...
+  colorHex  String? // Mã màu hex hiển thị lên UI (e.g. #FF0000)
+  brand     String? // Hãng sản xuất (e.g. eSun, Creality)
   spools    Spool[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([type, colorName, brand])
+  @@index([updatedAt])
 }
 
 model Printer {
-  id        String   @id       // Mã ID máy in (VD: PRT-ENDER3)
-  name      String             // Tên hiển thị (VD: Ender 3 V3)
-  model     String?            // Model máy (VD: Ender 3 V3 SE)
-  status    String   @default("idle") // idle, printing, maintenance
-  spools    Spool[]
-  tasks     Task3D[]
-  peiSheets PeiSheet[]
-  printItems PrintItem[] @relation("PrinterToPrintItem")
-  bulkRuns  BulkRun[]  @relation("PrinterToBulkRun")
+  id             String        @id // Mã ID máy in (VD: PRT-ENDER3)
+  name           String // Tên hiển thị (VD: Ender 3 V3)
+  model          String? // Model máy (VD: Ender 3 V3 SE)
+  status         String        @default("idle") // idle, printing, maintenance
+  spools         Spool[]
+  tasks          Task3D[]
+  peiSheets      PeiSheet[]
+  printItems     PrintItem[]   @relation("PrinterToPrintItem")
+  bulkRuns       BulkRun[]     @relation("PrinterToBulkRun")
+  suKien         SuKienMayIn[]
   cloudAccountId String?
-  cloudPrinterId String?   // Lưu trữ ID thực tế trên Cloud
+  cloudPrinterId String? // Lưu trữ ID thực tế trên Cloud
   cloudAccount   CloudAccount? @relation(fields: [cloudAccountId], references: [id], onDelete: SetNull)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+
+  /// LAN mode Bambu: mỗi máy in TỰ nó là một broker MQTT, nên thông tin kết nối nằm ở đây
+  /// chứ không ở CloudAccount như các provider đi qua một máy chủ trung gian (HA, Moonraker).
+  lanIp         String? // VD "192.168.99.20" — nên đặt DHCP reservation kẻo đổi IP là mất kết nối
+  lanAccessCode String? // Access Code trên màn hình máy (⚙️ → WLAN). Đổi khi reset máy.
+  /// Serial dùng làm topic MQTT (`device/<serial>/report`) — PHÂN BIỆT HOA/THƯỜNG.
+  /// Để riêng khỏi `cloudPrinterId` để đổi qua lại giữa LAN và Home Assistant chỉ cần sửa đúng
+  /// `cloudAccountId`, không phải viết đè ID của provider kia rồi loay hoay khôi phục.
+  lanSerial     String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   @@index([cloudAccountId])
+  @@index([updatedAt])
 }
 
 model CloudAccount {
   id        String    @id @default(uuid())
-  provider  String    // e.g., "anycubic", "bambulab"
-  email     String?   // Email đăng nhập hoặc username
+  provider  String // e.g., "anycubic", "bambulab"
+  email     String? // Email đăng nhập hoặc username
   token     String    @db.Text // Token xác thực (XX-Token cho Anycubic, Access Token cho loại khác)
   isActive  Boolean   @default(true)
   printers  Printer[]
@@ -61,49 +75,53 @@ model CloudAccount {
 }
 
 model Spool {
-  id                 String    @id // Người dùng tự nhập ID duy nhất
-  filamentId         String
-  filament           Filament  @relation(fields: [filamentId], references: [id], onDelete: Cascade)
-  locationId         String?   // Vị trí kho lưu trữ (nullable)
-  location           Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
-  printerId          String?   // Máy in đang sử dụng cuộn này (nullable)
-  printer            Printer?  @relation(fields: [printerId], references: [id], onDelete: SetNull)
-  printerSlot        Int?      // Slot của máy in (VD: 1, 2, 3, 4 cho AMS Bambu Lab)
-  initialWeightG     Float     // Khối lượng nhựa ban đầu (e.g. 1000g)
-  emptySpoolWeightG  Float     @default(220) // Khối lượng vỏ cuộn nhựa
-  remainingWeightG   Float     // Khối lượng nhựa còn lại (chỉ tính nhựa)
-  status             String    @default("active") // active, depleted, archived
-  taskUsages         Task3DSpoolUsage[]
-  inventoryItems     InventoryItem[]
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  id                String             @id // Người dùng tự nhập ID duy nhất
+  filamentId        String
+  filament          Filament           @relation(fields: [filamentId], references: [id], onDelete: Cascade)
+  locationId        String? // Vị trí kho lưu trữ (nullable)
+  location          Location?          @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  printerId         String? // Máy in đang sử dụng cuộn này (nullable)
+  printer           Printer?           @relation(fields: [printerId], references: [id], onDelete: SetNull)
+  printerSlot       Int? // Slot của máy in (VD: 1, 2, 3, 4 cho AMS Bambu Lab)
+  initialWeightG    Float // Khối lượng nhựa ban đầu (e.g. 1000g)
+  emptySpoolWeightG Float              @default(220) // Khối lượng vỏ cuộn nhựa
+  remainingWeightG  Float // Khối lượng nhựa còn lại (chỉ tính nhựa)
+  status            String             @default("active") // active, depleted, archived
+  taskUsages        Task3DSpoolUsage[]
+  inventoryItems    InventoryItem[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   @@index([filamentId])
   @@index([locationId])
   @@index([printerId])
   @@index([status])
+  @@index([updatedAt])
 }
 
 model PrintJob {
   id        String   @id @default(uuid())
-  qrCode    String   // Nội dung QR code (VD: LOC-01, C-PLA-R-01)
-  label     String   // Nội dung chữ in đi kèm (VD: Kho chứa đồ, Nhựa PLA Đỏ)
+  qrCode    String // Nội dung QR code (VD: LOC-01, C-PLA-R-01)
+  label     String // Nội dung chữ in đi kèm (VD: Kho chứa đồ, Nhựa PLA Đỏ)
   status    String   @default("pending") // pending, completed, failed
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Index dashboard §7.6: lọc tem in theo ngày
+  @@index([createdAt])
 }
 
 model Task3D {
-  id               String   @id @default(uuid())
+  id               String             @id @default(uuid())
   printerId        String?
-  printer          Printer? @relation(fields: [printerId], references: [id], onDelete: SetNull)
-  name             String?  // Optional name for the print object
-  status           String   @default("printing") // printing, completed, failed, cancelled
+  printer          Printer?           @relation(fields: [printerId], references: [id], onDelete: SetNull)
+  name             String? // Optional name for the print object
+  status           String             @default("printing") // printing, completed, failed, cancelled
   estimatedEndTime DateTime?
   durationMinutes  Int?
   usages           Task3DSpoolUsage[]
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
 
   @@index([printerId])
   @@index([status])
@@ -120,6 +138,8 @@ model Task3DSpoolUsage {
 
   @@index([taskId])
   @@index([spoolId])
+  // Index dashboard §7.6: lọc theo ngày để tính nhựa trừ trong kỳ
+  @@index([createdAt])
 }
 
 model InventorySession {
@@ -144,14 +164,15 @@ model InventoryItem {
 
 model PeiSheet {
   id        String      @id @default(uuid())
-  name      String      // e.g., "Mâm PEI Số 1"
-  printerId String?     // Gắn mâm này vào máy in nào (nếu đang in)
+  name      String // e.g., "Mâm PEI Số 1"
+  printerId String? // Gắn mâm này vào máy in nào (nếu đang in)
   printer   Printer?    @relation(fields: [printerId], references: [id], onDelete: SetNull)
   items     PrintItem[]
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
   @@index([printerId])
+  @@index([updatedAt])
 }
 
 model Order {
@@ -162,20 +183,23 @@ model Order {
   products     OrderProduct[]
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
+
+  @@index([updatedAt])
 }
 
 model OrderProduct {
   id        String      @id @default(uuid())
   orderId   String
   order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  name      String      // Tên SP (VD: Hộp A)
-  quantity  Int         // Số lượng bộ/hộp (VD: 5 hộp)
+  name      String // Tên SP (VD: Hộp A)
+  quantity  Int // Số lượng bộ/hộp (VD: 5 hộp)
   price     Float       @default(0) // Giá bán của sản phẩm
   items     PrintItem[]
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
   @@index([orderId])
+  @@index([updatedAt])
 }
 
 // ── Hàng hóa cửa hàng (tab Store) ──
@@ -212,6 +236,13 @@ model StoreProduct {
   ngayTao       String
   ngayCapNhat   String
 
+  /// Mốc sửa đổi do **server** giữ, khác hẳn `ngayCapNhat` ở trên.
+  ///
+  /// `ngayCapNhat` là chuỗi do client tự đặt nên không tin được để lọc delta: máy
+  /// lệch giờ, hoặc client ghi lại y nguyên giá trị cũ, là đồng bộ bỏ sót bản ghi.
+  /// Cột này Prisma tự đẩy mỗi lần ghi nên luôn tăng theo đồng hồ server.
+  updatedAt DateTime @default(now()) @updatedAt
+
   // Sản phẩm con combo (gộp 1/2/5 cái) tự sinh từ sản phẩm mẹ — mã SKU = mã mẹ + "-1"/"-2"/"-5".
   // Xóa sản phẩm mẹ thì xóa luôn các combo con (Cascade).
   parentId     String?
@@ -223,6 +254,9 @@ model StoreProduct {
   heSoCombo    Json?
 
   @@index([parentId])
+  @@index([updatedAt])
+  // Index dashboard §7.6: lọc hàng mẹ (parentId IS NULL) và sắp xếp theo tồn kho
+  @@index([parentId, soLuong])
 }
 
 // Cấu hình tab Store (danh sách cột thông tin tùy biến)
@@ -244,30 +278,131 @@ model MisaCredential {
   tid              String?
   tco              String?
   brid             String?
+  // Môi trường MISA của tenant ("g2"/"g3") — nằm trong JWT (claim `env`) và quyết định đường dẫn API
+  // (.../eshop/g3/api/...). Không hardcode được vì mỗi tenant một môi trường.
+  env              String    @default("g3")
+  // Hạn dùng đọc từ claim `exp` của chính Bearer token (JWT) — token MISA sống ~20,5 tiếng.
+  // Dùng để cảnh báo sớm và (sau này) tự đăng nhập lại bằng tài khoản phụ trước khi hết hạn.
+  tokenExpiresAt   DateTime?
+  // Refresh token của eShop (cookie _eshop_rf_token). Đổi được Bearer token mới qua
+  // POST auth/Accounts/refresh-token mà KHÔNG cần đăng nhập lại — đây là thứ giúp hệ thống tự gia
+  // hạn mãi sau một lần nhập OTP duy nhất.
+  refreshToken     String?   @db.Text
+  // Token của MISA ID (tokenMisaId) lấy lúc đăng nhập — dùng để xin lại phiên eShop nếu refresh hỏng.
+  tokenMisaId      String?   @db.Text
   lastCheckedAt    DateTime?
   lastCheckOk      Boolean?
   lastCheckMessage String?
   updatedAt        DateTime  @updatedAt
 }
 
+// ── Đơn hàng sàn kéo về từ MISA eShop (tab eShop) ──
+// Bản sao chỉ-đọc của đơn trên MISA: đồng bộ định kỳ + bấm tay, giữ lại trong DB để vẫn xem được
+// khi token hết hạn và để biết đơn nào đã trừ tồn kho rồi (xem `daTruTonKhoLuc`).
+model EshopOrder {
+  id                 String             @id // order_id (uuid) bên MISA — dùng luôn làm khóa chính để đồng bộ idempotent
+  refNo              String? // ref_no / order_no, VD "ĐH000005"
+  ecomOrderNo        String? // mã đơn bên sàn (TikTok Shop...)
+  channelId          Int?
+  channelName        String? // "TikTok Shop", "Shopee"...
+  partnerObjectName  String? // tên gian hàng
+  customerName       String?
+  orderStatus        Int? // field 218 bên MISA (30/35/40/45/50...)
+  partnerOrderStatus String? // "AWAITING_COLLECTION"...
+  paymentStatus      Int?
+  paymentMethod      String?
+  shippingPartner    String? // "J&T Express"...
+  deliveryCode       String? // mã vận đơn
+  totalRevenue       Float              @default(0)
+  totalAmount        Float              @default(0)
+  refDate            DateTime? // ngày chứng từ (field 39) — dùng để lọc khoảng đồng bộ
+  createTime         DateTime?
+  prepareDueTime     DateTime? // hạn chuẩn bị hàng — cột quan trọng để biết đơn nào phải in gấp
+  shippingDate       DateTime?
+  completeDate       DateTime?
+  // Mốc đã trừ tồn kho StoreProduct cho đơn này. Khác null = đã trừ, lần đồng bộ sau bỏ qua để
+  // không trừ trùng. Chỉ trừ khi đơn đã hoàn tất (completeDate khác null).
+  daTruTonKhoLuc     DateTime?
+  syncedAt           DateTime           @default(now())
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  items              EshopOrderItem[]
+  pickProgress       EshopPickProgress?
+
+  @@index([refDate])
+  @@index([orderStatus])
+  @@index([completeDate])
+  // Index dashboard §7.6: cảnh báo đơn sắp tới hạn chuẩn bị (C8)
+  @@index([prepareDueTime])
+}
+
+// Dòng hàng của đơn eShop. Mỗi lần đồng bộ 1 đơn thì xóa sạch rồi ghi lại (đơn có thể bị sửa bên
+// MISA), nên không cần khóa duy nhất theo SKU.
+model EshopOrderItem {
+  id              String     @id @default(uuid())
+  orderId         String
+  order           EshopOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  inventoryItemId String? // id hàng hóa bên MISA
+  skuCode         String? // trùng StoreProduct.maQR (kể cả mã combo con "...-1"/"-2"/"-5")
+  itemName        String
+  quantity        Float      @default(0)
+  unitName        String?
+  urlImage        String?    @db.Text
+
+  @@index([orderId])
+  @@index([skuCode])
+}
+
+// Bảng lưu riêng tiến độ nhặt hàng, không bị xóa khi đồng bộ lại từ MISA
+model EshopPickProgress {
+  orderId     String     @id
+  order       EshopOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // Lưu số lượng vật lý đã nhặt dưới dạng { "SKU_CON": 2 }
+  pickedItems Json       @default("{}")
+  status      String     @default("picking") // picking, picked
+  updatedAt   DateTime   @updatedAt
+}
+
+// Singleton ghi lại kết quả lần đồng bộ eShop gần nhất — hiển thị trên tab eShop và để bộ hẹn giờ
+// biết đã chạy tới đâu.
+model EshopSyncState {
+  id          String    @id @default("default")
+  lastSyncAt  DateTime?
+  lastSyncOk  Boolean?
+  lastMessage String?
+  lastCount   Int       @default(0)
+
+  // ── Gọi MISA qua "máy chính" ──
+  // MISA eShop chỉ cho 1 phiên đăng nhập: server gọi thẳng thì máy chính đang mở eShop bị đá ra.
+  // Khai `agentUrl` (VD http://192.168.1.5:39100) thì server chuyển request sang script agent chạy
+  // trên máy chính gọi hộ. Máy chính không phản hồi thì server tự gọi thẳng MISA (đơn vẫn về, đổi
+  // lại máy chính bị đăng xuất và phải dán token mới).
+  agentUrl      String?
+  agentLastOkAt DateTime? // lần cuối gọi qua máy chính thành công
+  lastRunVia    String? // 'agent' = qua máy chính, 'server' = server gọi thẳng
+
+  updatedAt DateTime @updatedAt
+}
+
 model PrintItem {
-  id          String        @id // Mã Barcode (chỉ dùng số)
-  productId   String
-  product     OrderProduct  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  name        String        // Tên miếng in (VD: Nắp hộp)
-  status      String        @default("pending") // pending, printing, completed
-  isChecked   Boolean       @default(false)
-  peiSheetId  String?
-  peiSheet    PeiSheet?     @relation(fields: [peiSheetId], references: [id], onDelete: SetNull)
-  printerId   String?
-  printer     Printer?      @relation("PrinterToPrintItem", fields: [printerId], references: [id], onDelete: SetNull)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id         String       @id // Mã Barcode (chỉ dùng số)
+  productId  String
+  product    OrderProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name       String // Tên miếng in (VD: Nắp hộp)
+  status     String       @default("pending") // pending, printing, completed
+  isChecked  Boolean      @default(false)
+  peiSheetId String?
+  peiSheet   PeiSheet?    @relation(fields: [peiSheetId], references: [id], onDelete: SetNull)
+  printerId  String?
+  printer    Printer?     @relation("PrinterToPrintItem", fields: [printerId], references: [id], onDelete: SetNull)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
 
   @@index([productId])
   @@index([peiSheetId])
   @@index([printerId])
   @@index([status])
+  @@index([updatedAt])
 }
 
 // ── Sản xuất số lượng lớn (chế độ 2) ──
@@ -278,9 +413,9 @@ model BulkOrder {
   id            String    @id @default(uuid())
   orderCode     String?   @unique // mã đơn để tra cứu (VD: SLL-001)
   customerName  String?
-  productName   String    // tên sản phẩm đang chạy (VD: "Móc khóa rồng")
-  totalQuantity Int       // tổng số con phải in cho cả đơn
-  perSheetQty   Int       // số con in được trên 1 mâm PEI
+  productName   String // tên sản phẩm đang chạy (VD: "Móc khóa rồng")
+  totalQuantity Int // tổng số con phải in cho cả đơn
+  perSheetQty   Int // số con in được trên 1 mâm PEI
   note          String?
   status        String    @default("pending") // pending, printing, completed
   runs          BulkRun[]
@@ -288,29 +423,314 @@ model BulkOrder {
   updatedAt     DateTime  @updatedAt
 
   @@index([status])
+  @@index([updatedAt])
 }
 
 // 1 lượt in = 1 mâm PEI trên 1 máy. Số lượt = ceil(totalQuantity / perSheetQty), chia vòng tròn cho
 // các máy được chọn lúc tạo đơn nên mỗi máy có PEI 1, PEI 2, PEI 3... theo `peiIndex`.
 model BulkRun {
-  id           String    @id // Mã vạch 8 số (không trùng với PrintItem.id — xem utils/barcode.ts)
-  orderId      String
-  order        BulkOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  printerId    String?
-  printer      Printer?  @relation("PrinterToBulkRun", fields: [printerId], references: [id], onDelete: SetNull)
-  printerName  String    // tên máy chốt lúc chia lượt — giữ lại để bảng lịch sử vẫn đọc được nếu máy bị xóa
-  seq          Int       // thứ tự lượt trong cả đơn (1..N)
-  peiIndex     Int       // lượt PEI thứ mấy TRÊN MÁY này (1, 2, 3...)
-  quantity     Int       // số con của lượt này (lượt cuối có thể lẻ, ít hơn perSheetQty)
-  defectQuantity Int     @default(0) // số con lỗi, nhập lúc quẹt "in xong"
-  isRework     Boolean   @default(false) // lượt in bù cho hàng lỗi (không nằm trong kế hoạch gốc)
-  status       String    @default("pending") // pending, printing, completed
-  startedAt    DateTime? // mốc quẹt check-in
-  finishedAt   DateTime? // mốc quẹt check-out
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id             String    @id // Mã vạch 8 số (không trùng với PrintItem.id — xem utils/barcode.ts)
+  orderId        String
+  order          BulkOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  printerId      String?
+  printer        Printer?  @relation("PrinterToBulkRun", fields: [printerId], references: [id], onDelete: SetNull)
+  printerName    String // tên máy chốt lúc chia lượt — giữ lại để bảng lịch sử vẫn đọc được nếu máy bị xóa
+  seq            Int // thứ tự lượt trong cả đơn (1..N)
+  peiIndex       Int // lượt PEI thứ mấy TRÊN MÁY này (1, 2, 3...)
+  quantity       Int // số con của lượt này (lượt cuối có thể lẻ, ít hơn perSheetQty)
+  defectQuantity Int       @default(0) // số con lỗi, nhập lúc quẹt "in xong"
+  isRework       Boolean   @default(false) // lượt in bù cho hàng lỗi (không nằm trong kế hoạch gốc)
+  status         String    @default("pending") // pending, printing, completed
+  startedAt      DateTime? // mốc quẹt check-in
+  finishedAt     DateTime? // mốc quẹt check-out
+  verifiedAt     DateTime? // mốc quẹt kiểm hàng lại sau khi in xong (null = chưa kiểm)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@index([orderId])
   @@index([printerId])
   @@index([status])
+  @@index([updatedAt])
+  // Index dashboard §7.6: lọc lượt theo (trạng thái, ngày hoàn thành) để tính KPI nhanh
+  @@index([status, finishedAt])
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Zalo — gom tin nhắn khách gửi tới shop về web để quản lý tập trung
+// ══════════════════════════════════════════════════════════════════════════════
+// Dùng thư viện zca-js (API KHÔNG chính thức, đăng nhập bằng tài khoản Zalo cá nhân). Zalo chỉ cho
+// MỘT listener websocket trên mỗi tài khoản: mở Zalo Web trên trình duyệt là listener bị đá ra.
+// Vì vậy phần chạy thật nằm ở tiến trình riêng `scripts/zalo-worker.mjs` — Next server không giữ
+// phiên Zalo, chỉ đọc DB và nhờ worker gửi tin qua cổng điều khiển nội bộ.
+
+/// Một tài khoản Zalo của shop. Nhiều dòng = nhiều tài khoản chạy song song, mỗi tài khoản một
+/// listener websocket riêng trong cùng worker (zca-js tạo context mới mỗi `new Zalo()`, không
+/// dùng chung state nên chạy song song được).
+model ZaloAccount {
+  id String @id @default(uuid())
+
+  /// Tên tự đặt để phân biệt trên web (VD "Shop chính", "CSKH"). Khác `displayName` — cái kia là
+  /// tên Zalo thật, chỉ có sau khi đăng nhập xong.
+  nhan String?
+
+  // ── Thông tin phiên, lấy từ sự kiện GotLoginInfo lúc quét QR ──
+  // Có đủ 3 thứ này thì lần sau worker gọi `zalo.login()` là vào thẳng, không phải quét QR lại.
+  cookieJson String? @db.Text // mảng cookie đã serialize (tough-cookie)
+  imei       String?
+  userAgent  String? @db.Text
+
+  ownId       String? // uid của chính tài khoản shop — dùng để phân biệt tin mình gửi với tin khách gửi
+  displayName String?
+  avatar      String? @db.Text
+
+  // 'chua_dang_nhap' | 'dang_cho_quet' | 'dang_ket_noi' | 'dang_chay' | 'mat_ket_noi' | 'loi'
+  trangThai       String       @default("chua_dang_nhap")
+  lastConnectedAt DateTime? // lần cuối listener bắt tay websocket thành công
+  lastMessageAt   DateTime? // tin nhắn gần nhất nhận được — dùng để biết worker còn sống hay đã treo
+  lastError       String?      @db.Text
+  threads         ZaloThread[]
+  updatedAt       DateTime     @updatedAt
+}
+
+/// Một hội thoại (khách lẻ hoặc nhóm) TRONG PHẠM VI MỘT TÀI KHOẢN.
+model ZaloThread {
+  /// Khóa riêng của mình, KHÔNG phải id bên Zalo — vì cùng một khách nhắn tới hai tài khoản shop
+  /// sẽ cho ra hai hội thoại khác nhau mà `threadId` bên Zalo lại trùng nhau.
+  /// (Dòng có từ trước đợt đa tài khoản vẫn giữ giá trị cũ là threadId Zalo — chỉ là chuỗi mờ,
+  /// không ảnh hưởng gì.)
+  id String @id @default(uuid())
+
+  accountId String
+  account   ZaloAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  /// id hội thoại bên Zalo — dùng khi gọi API gửi tin.
+  threadId  String
+
+  type Int @default(0) // 0 = chat riêng (ThreadType.User), 1 = nhóm (ThreadType.Group)
+
+  name   String? // tên khách / tên nhóm — lấy từ dName của tin nhắn, cập nhật dần
+  avatar String? @db.Text
+
+  lastMessageAt   DateTime? // dùng để sắp xếp danh sách hội thoại
+  lastMessageText String?   @db.Text // đoạn xem trước hiển thị ở danh sách bên trái
+  /// Số tin CHƯA ĐỌC TRÊN WEB — đếm riêng của mình, không đồng bộ với app Zalo. Mở hội thoại
+  /// trên web thì về 0; đọc trên điện thoại thì web vẫn hiện chưa đọc (chấp nhận được).
+  unreadCount     Int       @default(0)
+
+  messages  ZaloMessage[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  /// Một tài khoản chỉ có đúng một hội thoại với mỗi threadId Zalo — đây là khóa để worker
+  /// upsert khi tin mới về.
+  @@unique([accountId, threadId])
+  @@index([lastMessageAt])
+  @@index([accountId])
+}
+
+/// Một tin nhắn. Ghi cả tin khách gửi lẫn tin shop gửi (từ web hoặc từ app Zalo).
+model ZaloMessage {
+  id String @id @default(uuid())
+
+  /// msgId của Zalo. Websocket có thể bắn trùng một tin (reconnect, đồng bộ tin cũ) nên đây là
+  /// khóa chống trùng — kèm threadId vì msgId chỉ duy nhất trong phạm vi một hội thoại.
+  msgId    String
+  cliMsgId String?
+
+  threadId String
+  thread   ZaloThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  senderId   String?
+  senderName String?
+  /// true = tin do chính tài khoản shop gửi đi (từ web hoặc từ app Zalo trên điện thoại).
+  isSelf     Boolean @default(false)
+
+  /// msgType thô của Zalo: "webchat" (text), "chat.photo", "chat.sticker", "share.file"...
+  /// Giữ nguyên chuỗi gốc thay vì quy về enum để tin dạng lạ vẫn lưu được, không mất dữ liệu.
+  msgType String  @default("webchat")
+  content String? @db.Text // nội dung text; tin đính kèm thì là caption (có thể rỗng)
+  /// Payload gốc của Zalo dạng JSON, giữ lại để về sau đọc thêm trường mà giờ chưa dùng tới.
+  rawJson String? @db.Text
+
+  quoteMsgId String? // tin này đang trả lời tin nào
+  /// true khi khách thu hồi tin. Không xóa dòng — vẫn hiện "Tin nhắn đã thu hồi" cho có ngữ cảnh.
+  isUndone   Boolean @default(false)
+
+  sentAt      DateTime // mốc thật của tin (ts bên Zalo), KHÔNG phải lúc web ghi vào DB
+  attachments ZaloAttachment[]
+  createdAt   DateTime         @default(now())
+
+  @@unique([threadId, msgId])
+  @@index([threadId, sentAt])
+}
+
+/// Ảnh / file / voice đính kèm, ĐÃ TẢI VỀ SERVER. Link CDN của Zalo hết hạn sau một thời gian nên
+/// chỉ lưu URL là mất ảnh cũ — worker tải về đĩa ngay lúc nhận tin.
+model ZaloAttachment {
+  id        String      @id @default(uuid())
+  messageId String
+  message   ZaloMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  kind     String  @default("file") // 'image' | 'video' | 'voice' | 'file'
+  fileName String?
+  mimeType String?
+  size     Int? // byte
+  url      String? @db.Text // link gốc bên Zalo, giữ lại để tải lại nếu bản local hỏng
+
+  /// Đường dẫn tương đối trong thư mục lưu trữ (VD "2026-08/abc123.jpg"). Để tương đối để đổi
+  /// chỗ lưu (đổi ổ đĩa, mount NAS) không phải sửa dữ liệu cũ.
+  localPath String?
+  /// Tải lỗi thì `localPath` rỗng và lý do nằm ở đây — web hiện link Zalo gốc để không mất hẳn.
+  taiLoi    String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([messageId])
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Đồng bộ offline cho app di động — xem KE-HOACH-DONG-BO-OFFLINE.md
+// ══════════════════════════════════════════════════════════════════════════════
+
+/// Dấu vết bản ghi đã bị xóa, để máy offline biết mà xóa theo.
+///
+/// Chọn bảng bia mộ riêng thay vì thêm cột `deletedAt` vào 11 model: cách kia bắt
+/// **mọi** truy vấn sẵn có phải thêm `deletedAt: null`, sót một chỗ là bản ghi đã
+/// xóa sống lại — kiểu lỗi rất khó thấy. Ở đây route xóa chỉ ghi thêm một dòng,
+/// phần còn lại của hệ thống không đổi gì.
+///
+/// **Không ghi bia mộ cho bản ghi con bị xóa dây chuyền** (Cascade của Prisma
+/// không chạy qua đây). Không cần: app biết quan hệ cha–con trong CSDL cục bộ của
+/// nó, nhận tin cha bị xóa thì tự dọn con.
+model SyncTombstone {
+  id Int @id @default(autoincrement())
+
+  /// Tên bảng đúng như key trong payload delta (VD "spools", "printItems").
+  bang     String
+  banGhiId String
+
+  /// Xóa rồi tạo lại rồi xóa nữa thì upsert đè mốc mới — luôn là lần xóa gần nhất.
+  xoaLuc DateTime @default(now())
+
+  @@unique([bang, banGhiId])
+  @@index([xoaLuc])
+}
+
+/// Nhật ký thao tác nhận từ app, khóa theo uuid do máy gửi sinh ra.
+///
+/// Đây là thứ chống quẹt hai lần: mất mạng giữa lúc POST thì app không biết server
+/// đã nhận chưa nên buộc phải gửi lại. Không có bảng này thì mỗi lần gửi lại là
+/// một lần check-in nữa, sai lịch sử sản xuất.
+model SyncAction {
+  /// uuid sinh tại máy PDA, không phải server cấp.
+  id String @id
+
+  /// Mã thao tác trong §2.1 của kế hoạch (VD "bulkRun.checkIn").
+  loai    String
+  payload Json
+
+  /// Giờ thợ thao tác, theo đồng hồ máy PDA — dùng cho luật LWW.
+  /// Không tin được tuyệt đối (máy có thể lệch giờ) nên chỉ dùng so sánh tương đối.
+  taoLuc DateTime
+
+  /// Giờ server áp dụng, theo đồng hồ server.
+  apDungLuc DateTime @default(now())
+
+  /// 'applied' | 'rejected'
+  ketQua    String
+  thongDiep String? @db.Text
+
+  /// Máy nào gửi lên — để truy vết khi hai máy cùng quẹt một mã.
+  thietBi String?
+
+  @@index([apDungLuc])
+  @@index([loai])
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Thông báo đẩy — theo dõi hoạt động máy in để kịp phát hiện lỗi
+// ══════════════════════════════════════════════════════════════════════════════
+// Vòng giám sát nền (`services/printer-monitor.service.ts`) hỏi trạng thái mọi máy in đã liên kết
+// theo chu kỳ, so với lần trước, và mỗi thay đổi đáng kể thì ghi một dòng `SuKienMayIn` rồi đẩy đi
+// (FCM tới app Flutter + tin nhắn Zalo). Bảng sự kiện là nguồn sự thật: thông báo có thể gửi hụt
+// (mất mạng, hết pin, chưa cài app) nhưng lịch sử thì không mất.
+
+/// Một thay đổi đáng chú ý của máy in.
+model SuKienMayIn {
+  id String @id @default(uuid())
+
+  printerId String
+  printer   Printer @relation(fields: [printerId], references: [id], onDelete: Cascade)
+
+  /// Tên máy chốt lúc sinh sự kiện — lịch sử vẫn đọc được nếu máy bị đổi tên hoặc xóa.
+  tenMay String
+
+  /// batDau | inXong | tamDung | inTiep | huy | loi | mangMat | mangLai | dungYen | nhietBatThuong
+  loai String
+
+  /// tin | canhBao | loi — quyết định app rung/kêu tới mức nào và có gửi Zalo hay không.
+  mucDo String @default("tin")
+
+  tieuDe  String
+  noiDung String @db.Text
+
+  /// Ảnh chụp trạng thái lúc đó, để xem lại mà không cần join thêm gì.
+  tienDo   Int?
+  tenFile  String?
+  nhietVoi Float?
+  nhietBan Float?
+
+  /// Đã đẩy đi được chưa (ít nhất một kênh thành công). Sai = thông báo trượt, UI có thể lọc ra xem.
+  daGui  Boolean @default(false)
+  loiGui String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([printerId, createdAt])
+  @@index([createdAt])
+  @@index([loai])
+}
+
+/// Một máy (điện thoại) đã đăng ký nhận push. Token FCM do Firebase cấp cho từng lần cài app và có
+/// thể đổi bất cứ lúc nào, nên app gửi lại token mỗi lần mở và mỗi lần Firebase báo xoay token.
+model ThietBiThongBao {
+  id    String @id @default(uuid())
+  token String @unique
+
+  /// android | ios
+  nenTang String
+
+  /// Tên máy do app tự đặt (VD "PDA kho 1") — để biết cái nào là cái nào lúc gỡ bớt.
+  tenMay String?
+
+  /// Tắt khi FCM báo token không còn hợp lệ (UNREGISTERED); giữ dòng lại để truy vết.
+  hoatDong Boolean @default(true)
+
+  lanCuoi   DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@index([hoatDong])
+}
+
+/// Cấu hình gửi thông báo. Luôn đúng MỘT dòng, id cố định "default" — cấu hình toàn hệ thống chứ
+/// không theo người dùng (xưởng dùng chung một tài khoản).
+model CaiDatThongBao {
+  id String @id @default("default")
+
+  /// Tắt cái này là im hoàn toàn, vẫn ghi lịch sử sự kiện.
+  bat Boolean @default(true)
+
+  guiApp  Boolean @default(true)
+  guiZalo Boolean @default(false)
+
+  /// Hội thoại/nhóm Zalo nhận thông báo. Tên lưu kèm để UI hiện được mà không phải join.
+  zaloThreadId    String?
+  zaloTenHoiThoai String?
+
+  /// Các `loai` sự kiện KHÔNG gửi (vẫn ghi lịch sử). Mặc định rỗng = gửi tất cả.
+  loaiTat String[] @default([])
+
+  /// Chỉ gửi Zalo khi mức độ >= ngưỡng này: tin | canhBao | loi. Tránh spam nhóm chat.
+  nguongZalo String @default("canhBao")
+
+  updatedAt DateTime @updatedAt
 }

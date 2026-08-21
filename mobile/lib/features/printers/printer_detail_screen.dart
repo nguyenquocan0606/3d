@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/config/app_settings.dart';
 import '../../core/format/formatters.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
@@ -9,7 +10,10 @@ import '../../data/providers.dart';
 import '../../data/repositories/label_repository.dart';
 import '../../data/repositories/printer_repository.dart';
 import '../spools/spools_screen.dart';
+import 'cam_may_in.dart';
+import 'printer_form_sheet.dart';
 import 'printers_screen.dart';
+import 'tinh_trang_may.dart';
 
 /// Chi tiết + điều khiển từ xa 1 máy in.
 ///
@@ -42,6 +46,11 @@ class PrinterDetailScreen extends ConsumerWidget {
         title: Text(printer.name),
         actions: [
           IconButton(
+            tooltip: 'Sửa máy in',
+            onPressed: () => moFormMayIn(context, may: printer!),
+            icon: const Icon(Icons.edit_rounded),
+          ),
+          IconButton(
             tooltip: 'In tem QR máy in',
             onPressed: () => _printLabel(context, ref, printer!),
             icon: const Icon(Icons.print_rounded),
@@ -51,7 +60,21 @@ class PrinterDetailScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
-          _StatusCard(printer: printer, live: live),
+          _StatusCard(
+            printer: printer,
+            live: live,
+            baseUrl: ref.watch(appSettingsProvider).baseUrl,
+          ),
+          if (printer.cloudPrinterId != null) ...[
+            const SizedBox(height: 16),
+            SectionCard(
+              child: CamMayIn(
+                baseUrl: ref.watch(appSettingsProvider).baseUrl,
+                may: printer.cloudPrinterId,
+                tenMay: printer.name,
+              ),
+            ),
+          ],
           if (printer.isCloudLinked) ...[
             const SizedBox(height: 16),
             _ControlPanel(printer: printer, live: live),
@@ -117,10 +140,13 @@ class PrinterDetailScreen extends ConsumerWidget {
 }
 
 class _StatusCard extends StatelessWidget {
-  const _StatusCard({required this.printer, this.live});
+  const _StatusCard({required this.printer, this.live, required this.baseUrl});
 
   final Printer printer;
   final PrinterLiveStatus? live;
+
+  /// Cần để ghép URL ảnh preview — backend trả đường dẫn tương đối cho ảnh lấy từ máy in.
+  final String baseUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -151,11 +177,11 @@ class _StatusCard extends StatelessWidget {
           ),
           if (live != null) ...[
             const SizedBox(height: 16),
-            if (live!.previewUrl != null)
+            if (live!.anhDayDu(baseUrl) != null)
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
                 child: Image.network(
-                  live!.previewUrl!,
+                  live!.anhDayDu(baseUrl)!,
                   height: 160,
                   width: double.infinity,
                   fit: BoxFit.cover,
@@ -189,6 +215,8 @@ class _StatusCard extends StatelessWidget {
               ),
             ],
             const SizedBox(height: 12),
+            TinhTrangMay(live: live!),
+            const SizedBox(height: 12),
             InfoRow(
               label: 'Đầu phun',
               value: Fmt.temperature(live!.nozzleTemp, live!.nozzleTargetTemp),
@@ -208,7 +236,7 @@ class _StatusCard extends StatelessWidget {
               ),
             if (live!.fileName != null)
               InfoRow(label: 'Tệp in', value: live!.fileName!),
-            InfoRow(label: 'Nguồn', value: live!.providerName),
+            InfoRow(label: 'Nguồn dữ liệu', value: live!.nguon.label),
           ] else
             const Padding(
               padding: EdgeInsets.only(top: 12),

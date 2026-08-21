@@ -81,6 +81,9 @@ export default function CameraCounterPage() {
             <Link href="/counter" className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg font-medium transition-colors">
               Bộ đếm thường
             </Link>
+            <Link href="/counter/tray" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-medium transition-colors">
+              Đếm trên khay
+            </Link>
           </div>
           <LiveClock />
         </header>

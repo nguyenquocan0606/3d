@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import {
   chiaLuotInTheoMay,
+  chiaLaiGiuTienDo,
   dinhDangThoiLuong,
   canBuBaoNhieu,
   tongSoLoi,
@@ -195,6 +196,9 @@ export default function BulkProductionTab() {
   const [editSplit, setEditSplit] = useState({ totalQuantity: '', perSheetQty: '' });
   const [editPrinterIds, setEditPrinterIds] = useState<string[]>([]);
   const [editLimits, setEditLimits] = useState<Record<string, string>>({});
+  // Đổi số con/mâm phần lớn là do khai nhầm (34 mà thật ra 35), nên mặc định sửa
+  // luôn số con của những mâm ĐẦY đã in — nếu không tổng số con của đơn đếm sai.
+  const [suaLuotDaChay, setSuaLuotDaChay] = useState(true);
 
   // Lượt đang chờ quẹt tem máy in để bắt đầu (bước 2 của check-in).
   const [choMay, setChoMay] = useState<{ run: BulkRun; productName: string } | null>(null);
@@ -292,6 +296,10 @@ export default function BulkProductionTab() {
           notify(`"${ma}" không phải mã máy in. Quẹt tem máy để bắt đầu, hoặc bấm Hủy.`);
           return;
         }
+        if (choMay.run.printerId && choMay.run.printerId !== may.id) {
+          notify(`Máy quét không khớp! Lượt này đã được gán cho máy: ${choMay.run.printerName}.`);
+          return;
+        }
         await guiQuetMa(choMay.run.id, may.id);
         return;
       }
@@ -346,22 +354,31 @@ export default function BulkProductionTab() {
     return { soLuot: luots.length, theoMay, duCuoi: luots[luots.length - 1].quantity };
   }, [form.totalQuantity, form.perSheetQty, selectedPrinterIds, printerLimits, printers]);
 
+  // Xem trước kết quả chia lại — dùng đúng hàm backend dùng, nên con số hiện ở đây
+  // khớp với những gì thật sự được ghi xuống.
   const previewChiaLai = useMemo(() => {
+    if (!editing) return null;
     const tong = Number(editSplit.totalQuantity);
     const moiMam = Number(editSplit.perSheetQty);
     if (!tong || !moiMam || editPrinterIds.length === 0) return null;
     const sucChua = sucChuaTheoMay(editPrinterIds, editLimits, moiMam);
-    const luots = chiaLuotInTheoMay(tong, sucChua);
-    if (luots.length === 0) return null;
+    const keHoach = chiaLaiGiuTienDo(editing.runs, tong, editPrinterIds, sucChua, suaLuotDaChay);
+    const moi = [...keHoach.capNhat, ...keHoach.themMoi];
     return {
-      soLuot: luots.length,
+      soLuot: keHoach.giuNguyen.length + moi.length,
+      giuNguyen: keHoach.giuNguyen.length,
+      daKhoa: keHoach.daKhoa,
+      dungLaiMa: keHoach.capNhat.length,
+      suaDaChay: keHoach.suaDaChay,
+      themMoi: keHoach.themMoi.length,
+      xoa: keHoach.xoa.length,
       theoMay: editPrinterIds.map((id, idx) => ({
         ten: printers.find((p) => p.id === id)?.name ?? id,
-        soLuot: luots.filter((l) => l.printerIndex === idx).length,
+        soLuot: moi.filter((l) => l.printerIndex === idx).length,
         moiMam: sucChua[idx],
       })),
     };
-  }, [editSplit, editPrinterIds, editLimits, printers]);
+  }, [editing, editSplit, editPrinterIds, editLimits, suaLuotDaChay, printers]);
 
   const toggleMay = (id: string) => {
     setSelectedPrinterIds((cu) => (cu.includes(id) ? cu.filter((x) => x !== id) : [...cu, id]));
@@ -431,6 +448,7 @@ export default function BulkProductionTab() {
     }
     setEditPrinterIds(thuTu);
     setEditLimits(sucChua);
+    setSuaLuotDaChay(true);
 
     setEditForm({
       orderCode: order.orderCode || '',
@@ -478,15 +496,29 @@ export default function BulkProductionTab() {
     if (!moiMam) return notify('Vui lòng nhập số con mỗi mâm PEI');
     if (editPrinterIds.length === 0) return notify('Vui lòng chọn ít nhất 1 máy in');
 
-    const daChay = editing.runs.filter((r) => r.status !== 'pending').length;
+    const keHoach = chiaLaiGiuTienDo(
+      editing.runs,
+      tong,
+      editPrinterIds,
+      sucChuaTheoMay(editPrinterIds, editLimits, moiMam),
+      suaLuotDaChay
+    );
     window.dispatchEvent(
       new CustomEvent('appConfirm', {
         detail: {
           title: 'Chia lại lượt in',
           message:
-            `Toàn bộ ${editing.runs.length} lượt hiện tại sẽ bị xóa và cấp mã vạch mới. ` +
-            `Tem đã in ra thành rác, phải in lại` +
-            (daChay > 0 ? ` — kể cả ${daChay} lượt đã quẹt (mốc giờ mất hết).` : '.'),
+            `Giữ nguyên ${keHoach.giuNguyen.length} lượt đã chạy (${keHoach.daKhoa} con)` +
+            (keHoach.suaDaChay.length > 0
+              ? `, trong đó sửa số con của ${keHoach.suaDaChay.length} mâm đã in`
+              : '') +
+            '. ' +
+            `${keHoach.capNhat.length} lượt chưa chạy được tính lại nhưng giữ nguyên mã vạch` +
+            (keHoach.themMoi.length > 0
+              ? `, thêm ${keHoach.themMoi.length} lượt mới (phải in tem)`
+              : '') +
+            (keHoach.xoa.length > 0 ? `, xóa ${keHoach.xoa.length} lượt thừa` : '') +
+            '. Tem của lượt được tính lại vẫn quẹt được, nhưng số PEI / số con in trên tem có thể sai — in lại cho khớp.',
           onConfirm: async () => {
             setSaving(true);
             try {
@@ -502,6 +534,7 @@ export default function BulkProductionTab() {
                       .filter((id) => Number(editLimits[id]) > 0)
                       .map((id) => [id, Number(editLimits[id])])
                   ),
+                  suaLuotDaChay,
                 }),
               });
               const data = await res.json();
@@ -639,8 +672,8 @@ export default function BulkProductionTab() {
             <PrinterIcon size={18} className="text-amber-500 shrink-0" />
             <div className="text-sm text-amber-600 dark:text-amber-300 flex-1">
               Đang chờ <span className="font-semibold">tem MÁY IN</span> cho lượt PEI{' '}
-              {choMay.run.peiIndex} · {choMay.run.quantity} con ({choMay.productName}). Quẹt tem máy
-              nào thì lượt được gán về máy đó.
+              {choMay.run.peiIndex} · {choMay.run.quantity} con ({choMay.productName}). Hãy quét tem máy{' '}
+              <span className="font-bold">{choMay.run.printerName}</span> để xác nhận (không được gán chéo).
             </div>
             <button
               onClick={() => setChoMay(null)}
@@ -899,7 +932,7 @@ export default function BulkProductionTab() {
             Trạng thái đơn sẽ tự tính lại theo các lượt mỗi khi quẹt mã.
           </div>
 
-          {/* Chia lại lượt: tách khỏi nút Lưu vì nó xóa sạch lượt cũ + mã vạch cũ */}
+          {/* Chia lại lượt: tách khỏi nút Lưu vì nó viết lại kế hoạch in của đơn */}
           <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
             {!chiaLai ? (
               <button
@@ -910,10 +943,10 @@ export default function BulkProductionTab() {
               </button>
             ) : (
               <div className="space-y-3">
-                <div className="text-xs text-rose-500 leading-relaxed">
-                  Chia lại sẽ xóa toàn bộ {editing.runs.length} lượt hiện tại và cấp mã vạch mới:
-                  tem đã in ra thành rác, mốc check-in/check-out đã ghi mất hết. Chỉ làm khi đơn
-                  chưa chạy hoặc chấp nhận in lại tem.
+                <div className="text-xs text-amber-600 dark:text-amber-400 leading-relaxed">
+                  Lượt đã quẹt và lượt in bù được giữ nguyên (số con, máy, mốc giờ, số lỗi). Chỉ
+                  phần chưa chạy bị tính lại — mã vạch cũ dùng lại theo thứ tự, thừa thì xóa từ
+                  cuối, thiếu thì cấp mã mới.
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -962,13 +995,48 @@ export default function BulkProductionTab() {
                   />
                 </div>
 
+                <label className="flex items-start gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={suaLuotDaChay}
+                    onChange={(e) => setSuaLuotDaChay(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 accent-indigo-600"
+                  />
+                  <span className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                    Sửa cả các mâm đã in
+                    {previewChiaLai && previewChiaLai.suaDaChay.length > 0 && (
+                      <span className="text-indigo-600 dark:text-indigo-300 font-semibold">
+                        {' '}
+                        ({previewChiaLai.suaDaChay.length} mâm:{' '}
+                        {previewChiaLai.suaDaChay[0].quantityCu} →{' '}
+                        {previewChiaLai.suaDaChay[0].quantity} con)
+                      </span>
+                    )}
+                    <span className="block text-slate-500 dark:text-slate-400">
+                      Bật khi số con/mâm cũ bị khai nhầm: mâm ĐẦY đã in cũng được sửa lại số con
+                      (mốc giờ, số lỗi, mã vạch giữ nguyên). Tắt nếu mâm cũ thật sự in đúng số cũ.
+                    </span>
+                  </span>
+                </label>
+
                 {previewChiaLai && (
                   <div className="bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-4 text-sm text-slate-600 dark:text-slate-300">
-                    Sẽ chia lại thành{' '}
+                    Sau khi chia lại đơn có{' '}
                     <span className="font-bold text-indigo-600 dark:text-indigo-300">
                       {previewChiaLai.soLuot} lượt in
                     </span>{' '}
-                    — {previewChiaLai.theoMay.map((m) => `${m.ten}: ${m.soLuot} lượt × ${m.moiMam} con`).join(' · ')}
+                    — giữ {previewChiaLai.giuNguyen} lượt đã chạy ({previewChiaLai.daKhoa} con
+                    {previewChiaLai.suaDaChay.length > 0 &&
+                      `, sửa số con ${previewChiaLai.suaDaChay.length} mâm`}
+                    ), tính lại {previewChiaLai.dungLaiMa} lượt (giữ mã)
+                    {previewChiaLai.themMoi > 0 && `, thêm ${previewChiaLai.themMoi} lượt mới`}
+                    {previewChiaLai.xoa > 0 && `, xóa ${previewChiaLai.xoa} lượt thừa`}.
+                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Phần chia lại:{' '}
+                      {previewChiaLai.theoMay
+                        .map((m) => `${m.ten}: ${m.soLuot} lượt × ${m.moiMam} con`)
+                        .join(' · ')}
+                    </div>
                   </div>
                 )}
 

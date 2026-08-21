@@ -109,6 +109,13 @@ const quickActionGroups = <QuickActionGroup>[
       route: Routes.printers,
     ),
     QuickAction(
+      icon: Icons.videocam_rounded,
+      title: 'Camera máy in',
+      subtitle: 'Xem tất cả camera cùng lúc',
+      color: AppColors.warning,
+      route: Routes.cameras,
+    ),
+    QuickAction(
       icon: Icons.play_circle_rounded,
       title: 'Tạo lệnh in',
       subtitle: 'Trừ nhựa, đưa cuộn lên máy, hẹn giờ',
@@ -160,6 +167,20 @@ const quickActionGroups = <QuickActionGroup>[
       subtitle: 'Tra cứu, nhập/xuất kho, giá và combo',
       color: AppColors.indigoLight,
       route: Routes.store,
+    ),
+    QuickAction(
+      icon: Icons.notifications_active_rounded,
+      title: 'Hoạt động máy in',
+      subtitle: 'Nhật ký lỗi, in xong, mất kết nối',
+      color: AppColors.warning,
+      route: Routes.printerEvents,
+    ),
+    QuickAction(
+      icon: Icons.cloud_sync_rounded,
+      title: 'Chưa đồng bộ',
+      subtitle: 'Thao tác đang chờ gửi hoặc bị từ chối',
+      color: AppColors.info,
+      route: Routes.pendingSync,
     ),
     QuickAction(
       icon: Icons.settings_rounded,

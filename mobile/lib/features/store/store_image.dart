@@ -21,15 +21,45 @@ Uint8List? decodeDataUrl(String? dataUrl) {
 }
 
 /// Ảnh đại diện hàng hóa (thumbnail 96×96 do server nén sẵn bằng sharp).
-class StoreThumbnail extends StatelessWidget {
+///
+/// Có state chỉ để **giữ nguyên mảng byte giữa các lần dựng lại**. Bản cũ giải mã
+/// ngay trong `build`, và cái đắt không phải là base64 — mà là `Image.memory` so
+/// ảnh theo *danh tính* của mảng byte: mỗi lần dựng ra một `Uint8List` mới là bộ
+/// nhớ đệm ảnh của Flutter trượt sạch, phải giải nén lại PNG/JPEG từ đầu. Nhân
+/// với vài trăm dòng trong danh sách hàng hóa thì máy yếu không kịp thở.
+class StoreThumbnail extends StatefulWidget {
   const StoreThumbnail({super.key, required this.dataUrl, this.size = 48});
 
   final String? dataUrl;
   final double size;
 
   @override
+  State<StoreThumbnail> createState() => _StoreThumbnailState();
+}
+
+class _StoreThumbnailState extends State<StoreThumbnail> {
+  Uint8List? _bytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _bytes = decodeDataUrl(widget.dataUrl);
+  }
+
+  @override
+  void didUpdateWidget(StoreThumbnail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Chỉ giải mã lại khi đúng là ảnh khác — dòng trong danh sách hay bị dựng lại
+    // với cùng dữ liệu (đổi bộ lọc, cuộn qua cuộn lại).
+    if (oldWidget.dataUrl != widget.dataUrl) {
+      _bytes = decodeDataUrl(widget.dataUrl);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final bytes = decodeDataUrl(dataUrl);
+    final bytes = _bytes;
+    final size = widget.size;
 
     return Container(
       width: size,
@@ -42,7 +72,16 @@ class StoreThumbnail extends StatelessWidget {
       ),
       child: bytes == null
           ? Icon(Icons.inventory_2_outlined, size: size * 0.45, color: AppColors.muted)
-          : Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true),
+          : Image.memory(
+              bytes,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              // Giải nén thẳng về đúng cỡ hiển thị. Server đã nén sẵn 96×96 nên
+              // thường không đổi gì, nhưng hàng cũ nhập trước lúc có thumbnail có
+              // thể là ảnh gốc vài nghìn pixel — không có dòng này thì máy phải
+              // dựng bitmap khổng lồ rồi thu nhỏ lại chỉ để vẽ ô 48dp.
+              cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
+            ),
     );
   }
 }

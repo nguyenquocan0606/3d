@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { ScanBarcode, Printer, CheckCircle, Camera, X } from 'lucide-react';
 import ScanBarcodeModal from '@/components/Filament/scan-barcode-modal';
+import { colorCodeFor, findColorByCode, isColorCode } from '@/utils/color-code';
 
 interface PrintQrTabProps {
   allSpools: any[];
@@ -16,6 +17,7 @@ export default function PrintQrTab({
   allSpools,
   locations,
   printers,
+  filaments,
   globalScannedCode
 }: PrintQrTabProps) {
   const [scannedId, setScannedId] = useState('');
@@ -83,9 +85,13 @@ export default function PrintQrTab({
       if (foundP) return `${foundP.id}-L${slotMatch[2]}`;
     }
 
-    // 3. Kiểm tra mã màu CLR- (VD: CLRRED -> CLR-RED)
-    if (cleanInput.startsWith('CLR')) {
-      return `CLR-${cleanInput.substring(3)}`;
+    // 3. Kiểm tra mã màu CLR- (VD: CLRRED -> CLR-RED).
+    // Màu nhiều chữ ("FOREST GREEN") không thể tự chắp lại từ chuỗi đã bỏ hết
+    // gạch nối, nên phải dò theo danh sách màu thật để lấy lại mã chuẩn.
+    if (isColorCode(input)) {
+      const matchedColor = findColorByCode(filaments, input, (f: any) => f.colorName);
+      if (matchedColor) return colorCodeFor(matchedColor.colorName);
+      return input.trim().toUpperCase();
     }
 
     // 4. Kiểm tra cuộn nhựa (VD: PLAWHT01 -> PLA-WHT-01)
@@ -147,12 +153,16 @@ export default function PrintQrTab({
           setError(`Không tìm thấy máy in: ${upperScanned}`);
         }
       } else if (isColorQR) {
-        const colorName = upperScanned.substring(4);
-        const newPreview = { 
-          id: upperScanned, 
-          label: `Màu ${colorName}`, 
+        // Ưu tiên tên màu thật trong DB để tem in ra luôn đúng chuẩn, kể cả khi
+        // tem cũ quét vào ghi sai dấu cách/gạch nối.
+        const matchedColor = findColorByCode(filaments, upperScanned, (f: any) => f.colorName);
+        const colorName = matchedColor ? matchedColor.colorName.toUpperCase() : upperScanned.substring(4);
+        const printId = matchedColor ? colorCodeFor(matchedColor.colorName) : upperScanned;
+        const newPreview = {
+          id: printId,
+          label: `Màu ${colorName}`,
           type: 'Mã màu nhựa',
-          payload: { line1: upperScanned, line2: 'MÃ MÀU NHỰA', line3: colorName }
+          payload: { line1: printId, line2: 'MÃ MÀU NHỰA', line3: colorName }
         };
         executePrint(newPreview);
       } else {

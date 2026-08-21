@@ -2661,7 +2661,9 @@ function ChiTietHangHoa({
               {comboCon.map((combo) => (
                 <ChinhHeSoCombo
                   key={combo.id}
+                  maQR={combo.maQR}
                   soLuongCombo={combo.soLuongCombo ?? 1}
+                  soLuong={combo.soLuong}
                   heSo={sanPham.heSoCombo[combo.soLuongCombo ?? 1] ?? 1}
                   gia={combo.gia}
                   giaKhuyenMai={combo.giaKhuyenMai}
@@ -3542,18 +3544,24 @@ function ModalTinhGiaVon({ onDong }: { onDong: () => void }) {
 }
 
 /**
- * Một dòng combo trên panel hàng mẹ: ô sửa hệ số + 2 giá tính ra từ nó.
+ * Một dòng combo trên panel hàng mẹ: mã SKU + tồn kho + ô sửa hệ số + 2 giá tính ra từ nó.
  * Giữ chuỗi đang gõ ở state riêng để người dùng xóa trắng ô hoặc gõ "1." không bị nhảy số; chỉ khi
  * gõ ra một số hợp lệ mới báo lên trên. Giá trị ngoài (đổi từ chỗ khác) đồng bộ lại qua useEffect.
  */
 function ChinhHeSoCombo({
+  maQR,
   soLuongCombo,
+  soLuong,
   heSo,
   gia,
   giaKhuyenMai,
   onDoi,
 }: {
+  /** Mã SKU của combo (mã mẹ + "-1"/"-2"/"-5") — đúng mã phải khai trên sàn. */
+  maQR: string;
   soLuongCombo: number;
+  /** Gộp được bao nhiêu bộ từ tồn kho mẹ (đã làm tròn xuống, xem tinhSoLuongCombo). */
+  soLuong: number;
   heSo: number;
   gia: number;
   giaKhuyenMai: number;
@@ -3570,31 +3578,51 @@ function ChinhHeSoCombo({
 
   return (
     <div className="flex items-center justify-between gap-2">
-      <span className="flex shrink-0 items-center gap-1.5">
-        <span className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300">
-          Combo x{soLuongCombo}
+      <span className="flex min-w-0 flex-col gap-1">
+        <span className="flex shrink-0 items-center gap-1.5">
+          <span className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300">
+            Combo x{soLuongCombo}
+          </span>
+          <input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            step={0.1}
+            value={dangGo}
+            onChange={(event) => {
+              const giaTri = event.target.value;
+              setDangGo(giaTri);
+              const so = Number(giaTri);
+              if (giaTri !== '' && Number.isFinite(so) && so >= 0) onDoi(so);
+            }}
+            onBlur={() => setDangGo(String(heSo))}
+            // Xem chú thích cùng loại ở OSua: chặn lăn chuột đổi số ngoài ý muốn.
+            onWheel={(event) => event.currentTarget.blur()}
+            aria-label={`Hệ số combo ${soLuongCombo}`}
+            className="w-14 rounded-lg border border-slate-300 bg-white px-1.5 py-0.5 text-center text-xs font-semibold tabular-nums outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-950"
+          />
+          <span className="text-[10px] text-slate-400">×</span>
         </span>
-        <input
-          type="number"
-          inputMode="decimal"
-          min={0}
-          step={0.1}
-          value={dangGo}
-          onChange={(event) => {
-            const giaTri = event.target.value;
-            setDangGo(giaTri);
-            const so = Number(giaTri);
-            if (giaTri !== '' && Number.isFinite(so) && so >= 0) onDoi(so);
-          }}
-          onBlur={() => setDangGo(String(heSo))}
-          // Xem chú thích cùng loại ở OSua: chặn lăn chuột đổi số ngoài ý muốn.
-          onWheel={(event) => event.currentTarget.blur()}
-          aria-label={`Hệ số combo ${soLuongCombo}`}
-          className="w-14 rounded-lg border border-slate-300 bg-white px-1.5 py-0.5 text-center text-xs font-semibold tabular-nums outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-950"
-        />
-        <span className="text-[10px] text-slate-400">×</span>
+        {/* Mã SKU + tồn kho: hai thứ hay phải tra khi khai combo lên sàn, để ngay đây khỏi phải mở
+            từng combo con ra xem. Hết hàng thì tô vàng cho dễ thấy. */}
+        <span className="flex min-w-0 items-center gap-1.5 text-[10px] leading-none">
+          <code
+            title={maQR}
+            className="min-w-0 truncate font-mono font-semibold text-slate-600 dark:text-slate-300"
+          >
+            {maQR}
+          </code>
+          <span className="text-slate-300 dark:text-slate-600">·</span>
+          <span
+            className={`shrink-0 tabular-nums ${
+              soLuong > 0 ? 'text-slate-500 dark:text-slate-400' : 'font-semibold text-amber-600 dark:text-amber-400'
+            }`}
+          >
+            {soLuong > 0 ? `${dinhDangSo.format(soLuong)} bộ` : 'Hết hàng'}
+          </span>
+        </span>
       </span>
-      <span className="flex min-w-0 flex-col items-end leading-tight">
+      <span className="flex shrink-0 flex-col items-end leading-tight">
         <span className="text-sm font-bold tabular-nums">{dinhDangTien.format(gia)}</span>
         <span className="text-[11px] tabular-nums text-slate-500 dark:text-slate-400">
           KM {dinhDangTien.format(giaKhuyenMai)}

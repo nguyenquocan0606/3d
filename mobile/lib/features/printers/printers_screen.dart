@@ -9,6 +9,8 @@ import '../../core/widgets/common.dart';
 import '../../data/models/printer.dart';
 import '../../data/providers.dart';
 import '../shell/quick_menu.dart';
+import 'printer_form_sheet.dart';
+import 'tinh_trang_may.dart';
 
 Color colorForLiveState(LiveState state) => switch (state) {
       LiveState.printing => AppColors.warning,
@@ -32,13 +34,18 @@ class PrintersScreen extends ConsumerWidget {
         title: const Text('Máy in'),
         actions: const [QuickMenuButton()],
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => moFormMayIn(context),
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('Thêm máy in'),
+      ),
       body: AsyncView(
         value: printers,
         onRetry: () => ref.read(printersProvider.notifier).refresh(),
         builder: (data) {
           if (data.isEmpty) {
             return const EmptyView(
-              message: 'Chưa có máy in nào.\nThêm máy in ở bản web.',
+              message: 'Chưa có máy in nào.\nBấm "Thêm máy in" để bắt đầu.',
               icon: Icons.print_disabled_rounded,
             );
           }
@@ -166,6 +173,10 @@ class PrinterCard extends StatelessWidget {
                 style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
               ),
             ],
+          ],
+          if (live != null) ...[
+            const SizedBox(height: 10),
+            TinhTrangMay(live: live!, rutGon: true),
           ],
           if (printer.spools.isNotEmpty) ...[
             const SizedBox(height: 12),

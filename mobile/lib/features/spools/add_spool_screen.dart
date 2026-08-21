@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/routes.dart';
+import '../../core/scan/pda_scan.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../../data/models/filament.dart';
@@ -172,8 +173,18 @@ class _AddSpoolScreenState extends ConsumerState<AddSpoolScreen> {
   static String _hexString(Color color) =>
       '#${(color.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
 
+  /// Quét tem đã in sẵn để lấy mã cuộn — chỉ điền vào ô, không tự tạo.
+  Future<String?> _applyScannedId(String code) async {
+    setState(() => _idController.text = code.trim());
+    return 'Mã cuộn: ${code.trim()}';
+  }
+
   @override
   Widget build(BuildContext context) {
+    return PdaScanScope(onCode: _applyScannedId, child: _buildScreen(context));
+  }
+
+  Widget _buildScreen(BuildContext context) {
     final filaments = ref.watch(filamentsProvider).valueOrNull ?? const <Filament>[];
     final locations = ref.watch(locationsProvider).valueOrNull ?? const [];
     final printers = ref.watch(printersProvider).valueOrNull ?? const [];

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../../core/scan/pda_scan.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../../data/models/order.dart';
@@ -29,6 +30,14 @@ class PeiSheetDetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Cầm mâm trên tay, bóp cò từng tem là miếng in vào thẳng mâm này.
+    return PdaScanScope(
+      onCode: (code) => _addItem(ref, code),
+      child: _buildScreen(context, ref),
+    );
+  }
+
+  Widget _buildScreen(BuildContext context, WidgetRef ref) {
     final sheetsAsync = ref.watch(peiSheetsProvider);
     final printers = ref.watch(printersProvider).valueOrNull ?? const <Printer>[];
 

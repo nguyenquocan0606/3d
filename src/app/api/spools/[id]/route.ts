@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { FilamentService } from '@/services/filament.service';
+import { ghiBiaMo } from '@/services/sync.service';
+import { baoThayDoi } from '@/services/sync-notify.service';
 
 export async function DELETE(
   request: Request,
@@ -20,6 +22,8 @@ export async function DELETE(
 
   const result = await FilamentService.deleteSpool(id);
   if (result.success) {
+    await ghiBiaMo('spools', id);
+    void baoThayDoi(['spools']);
     return NextResponse.json({
       status: 'success',
       data: true,

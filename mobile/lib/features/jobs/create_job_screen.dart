@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/format/formatters.dart';
+import '../../core/scan/pda_scan.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../../data/models/filament.dart';
@@ -118,8 +119,29 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
     }
   }
 
+  /// Chọn máy in theo mã vừa quét — dùng chung cho nút quét và cho máy PDA.
+  Future<String?> _applyPrinterCode(String code) async {
+    final printers = ref.read(printersProvider).valueOrNull ?? const <Printer>[];
+    final normalized = code.replaceAll('-', '').toUpperCase();
+    Printer? found;
+    for (final printer in printers) {
+      if (printer.id.replaceAll('-', '').toUpperCase() == normalized) {
+        found = printer;
+      }
+    }
+    if (found == null) {
+      throw Exception('Không tìm thấy máy in ${code.trim()}.');
+    }
+    _selectPrinter(found.id);
+    return 'Đã chọn máy in ${found.name}.';
+  }
+
   @override
   Widget build(BuildContext context) {
+    return PdaScanScope(onCode: _applyPrinterCode, child: _buildScreen(context));
+  }
+
+  Widget _buildScreen(BuildContext context) {
     final printers = ref.watch(printersProvider).valueOrNull ?? const <Printer>[];
     final spools = ref.watch(spoolsProvider).valueOrNull ?? const <Spool>[];
     final attached =
@@ -170,18 +192,13 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                     ),
                   );
                   if (code == null || !context.mounted) return;
-                  final normalized = code.replaceAll('-', '').toUpperCase();
-                  Printer? found;
-                  for (final printer in printers) {
-                    if (printer.id.replaceAll('-', '').toUpperCase() == normalized) {
-                      found = printer;
+                  try {
+                    await _applyPrinterCode(code);
+                  } catch (error) {
+                    if (context.mounted) {
+                      showToast(context, '$error', isError: true);
                     }
                   }
-                  if (found == null) {
-                    showToast(context, 'Không tìm thấy máy in $code.', isError: true);
-                    return;
-                  }
-                  _selectPrinter(found.id);
                 },
                 icon: const Icon(Icons.qr_code_scanner_rounded),
               ),

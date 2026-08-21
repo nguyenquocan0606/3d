@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/utils/db';
+import { ghiBiaMo } from '@/services/sync.service';
+import { baoThayDoi } from '@/services/sync-notify.service';
 import { generateUniqueBarcode } from '@/utils/barcode';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -232,6 +234,10 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
 
     // Cascade: Order → OrderProduct → PrintItem (đã khai báo onDelete: Cascade trong schema)
     await prisma.order.delete({ where: { id } });
+    await ghiBiaMo('orders', id);
+    // Con (OrderProduct, PrintItem) bị Cascade xóa theo — không ghi bia mộ
+    // riêng cho chúng, app tự dọn con khi thấy cha biến mất.
+    void baoThayDoi(['orders', 'orderProducts', 'printItems']);
 
     return NextResponse.json({ status: 'success', message: 'Đã xóa đơn hàng' });
   } catch (error: unknown) {

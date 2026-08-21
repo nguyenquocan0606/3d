@@ -10,9 +10,8 @@ import { dinhDangThoiLuong, trangThaiDon } from '@/utils/bulk-production';
  * miếng lỗi" sinh lượt in bù.
  * Mốc thời gian lấy theo lúc quẹt, không nhập tay.
  *
- * `printerId` (tùy chọn) là mã máy in quẹt kèm lúc check-in: máy chạy thật có thể
- * khác máy được chia lúc tạo đơn (máy kẹt nhựa, đổi mâm sang máy trống...), nên
- * quẹt tem máy nào thì lượt được gán về đúng máy đó.
+ * `printerId` (tùy chọn) là mã máy in quẹt kèm lúc check-in để xác nhận đúng máy
+ * đã được gán (verify). Không cho phép gán chéo sang máy khác.
  */
 export async function POST(req: Request) {
   try {
@@ -40,12 +39,14 @@ export async function POST(req: Request) {
     const bayGio = new Date();
     const laCheckIn = run.status === 'pending';
 
-    // Chỉ gán máy lúc check-in: check-out mà đổi máy thì mốc bắt đầu đã ghi cho
-    // máy cũ sẽ vô nghĩa.
+    // Chỉ xác nhận máy lúc check-in (không cho phép gán chéo)
     let may = null;
     if (laCheckIn && maMay) {
       may = await prisma.printer.findUnique({ where: { id: maMay } });
       if (!may) return fail(`Không tìm thấy máy in mã: ${maMay}`, 404);
+      if (run.printerId && run.printerId !== may.id) {
+        return fail(`Lượt in này đã được gán cho máy ${run.printerName}, không được phép gán chéo sang máy ${may.name}.`, 400);
+      }
     }
 
     const runMoi = await prisma.bulkRun.update({

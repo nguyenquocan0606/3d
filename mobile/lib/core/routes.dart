@@ -30,6 +30,17 @@ class Routes {
   static const orderCheck = '/order-check';
   static const settings = '/settings';
 
+  /// Xem camera của tất cả máy in cùng lúc.
+  static const cameras = '/cameras';
+
+  /// Màn thao tác chưa đồng bộ — danh sách chờ gửi và bị từ chối.
+  static const pendingSync = '/pending-sync';
+
+  /// Nhật ký hoạt động máy in. Thêm `?printerId=` để chỉ xem một máy.
+  static const printerEvents = '/printer-events';
+  static String printerEventsOf(String printerId) =>
+      '$printerEvents?printerId=${Uri.encodeComponent(printerId)}';
+
   // Màn chi tiết (push lên root navigator)
   static String spoolDetail(String id) => '/spool/${Uri.encodeComponent(id)}';
   static String printerDetail(String id) => '/printer/${Uri.encodeComponent(id)}';
@@ -39,4 +50,5 @@ class Routes {
   static String colorDetail(String name) => '/color/${Uri.encodeComponent(name)}';
   static String peiSheetDetail(String id) => '/pei-sheet/${Uri.encodeComponent(id)}';
   static String bulkOrderDetail(String id) => '/bulk-order/${Uri.encodeComponent(id)}';
+  static String eshopOrderDetail(String id) => '/eshop-order/${Uri.encodeComponent(id)}';
 }

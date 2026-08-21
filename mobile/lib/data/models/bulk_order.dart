@@ -35,6 +35,7 @@ class BulkRun {
     this.printerId,
     this.startedAt,
     this.finishedAt,
+    this.verifiedAt,
   });
 
   final String id;
@@ -59,6 +60,11 @@ class BulkRun {
   final DateTime? startedAt;
   final DateTime? finishedAt;
 
+  /// Mốc quẹt kiểm hàng lại sau khi in xong — null là chưa ai kiểm mâm này.
+  final DateTime? verifiedAt;
+
+  bool get isVerified => verifiedAt != null;
+
   /// Hàng tốt của lượt này.
   int get goodQuantity =>
       quantity - defectQuantity < 0 ? 0 : quantity - defectQuantity;
@@ -69,6 +75,24 @@ class BulkRun {
     final diff = finishedAt!.difference(startedAt!);
     return diff.isNegative ? null : diff;
   }
+
+  /// Chỉ đủ dùng cho luồng kiểm hàng: `verifiedAt` là trường duy nhất màn hình
+  /// tự vá tại chỗ, phần còn lại luôn đọc lại từ cache.
+  BulkRun copyWith({DateTime? verifiedAt, bool xoaVerifiedAt = false}) => BulkRun(
+        id: id,
+        orderId: orderId,
+        printerName: printerName,
+        seq: seq,
+        peiIndex: peiIndex,
+        quantity: quantity,
+        status: status,
+        defectQuantity: defectQuantity,
+        isRework: isRework,
+        printerId: printerId,
+        startedAt: startedAt,
+        finishedAt: finishedAt,
+        verifiedAt: xoaVerifiedAt ? null : (verifiedAt ?? this.verifiedAt),
+      );
 
   factory BulkRun.fromJson(Map<String, dynamic> json) => BulkRun(
         id: asString(json['id']),
@@ -83,6 +107,7 @@ class BulkRun {
         status: BulkStatus.from(asStringOrNull(json['status'])),
         startedAt: asDate(json['startedAt']),
         finishedAt: asDate(json['finishedAt']),
+        verifiedAt: asDate(json['verifiedAt']),
       );
 }
 
@@ -134,6 +159,26 @@ class BulkOrder {
   }
 
   int get doneRuns => runs.where((r) => r.status == BulkStatus.completed).length;
+
+  /// Các mâm đã in xong — đúng danh sách phải cầm lên kiểm lại, theo thứ tự lượt.
+  List<BulkRun> get runsToVerify {
+    final list = runs.where((r) => r.status == BulkStatus.completed).toList()
+      ..sort((a, b) => a.seq.compareTo(b.seq));
+    return list;
+  }
+
+  int get verifiedRuns => runs.where((r) => r.isVerified).length;
+
+  /// Hàng tốt đã được kiểm lại — con số nói "chắc chắn có thật" khi giao khách.
+  int get verifiedQuantity =>
+      runs.where((r) => r.isVerified).fold(0, (sum, r) => sum + r.goodQuantity);
+
+  /// Tiến độ kiểm hàng tính trên số mâm đã in xong (chưa in xong thì chưa kiểm được).
+  double get verifyProgress {
+    final can = runsToVerify.length;
+    if (can == 0) return 0;
+    return verifiedRuns / can;
+  }
 
   double get progress {
     if (totalQuantity <= 0) return 0;
@@ -235,6 +280,129 @@ List<PlannedRun> chiaLuotInTheoMay(int tongSoCon, List<int> sucChuaMoiMay) {
   }
 
   return luots;
+}
+
+/// Kết quả xem trước khi chia lại đơn mà vẫn giữ phần đã chạy.
+class ResplitPlan {
+  const ResplitPlan({
+    required this.giuNguyen,
+    required this.suaDaChay,
+    required this.daKhoa,
+    required this.dungLaiMa,
+    required this.themMoi,
+    required this.xoa,
+    required this.luotMoi,
+  });
+
+  /// Số lượt bị khóa (đã quẹt hoặc lượt in bù) — không đụng tới.
+  final int giuNguyen;
+
+  /// Mâm ĐẦY đã in được sửa lại số con vì sức chứa mâm cũ khai nhầm: (cũ, mới).
+  final List<({int cu, int moi})> suaDaChay;
+
+  /// Số con đã nằm trong các lượt bị khóa.
+  final int daKhoa;
+
+  /// Số lượt chưa chạy được tính lại nhưng **giữ nguyên mã vạch cũ**.
+  final int dungLaiMa;
+
+  /// Số lượt phải cấp mã vạch mới (in tem mới).
+  final int themMoi;
+
+  /// Số lượt `pending` thừa sẽ bị xóa từ cuối.
+  final int xoa;
+
+  /// Toàn bộ phần chia lại (dungLaiMa + themMoi), để vẽ bảng theo máy.
+  final List<PlannedRun> luotMoi;
+}
+
+/// Port `chiaLaiGiuTienDo()` của `src/utils/bulk-production.ts`.
+///
+/// Lượt đã quẹt và lượt in bù giữ nguyên; chỉ phần chưa ai đụng tới mới chia lại,
+/// rồi ghép vào các mã vạch `pending` đang có theo thứ tự `seq` — thừa thì xóa từ
+/// cuối, thiếu thì backend cấp mã mới. Dùng ở app **chỉ để xem trước**.
+///
+/// `suaLuotDaChay` (mặc định bật): sức chứa mâm cũ khai nhầm (34 mà thật ra 35) thì
+/// mâm ĐẦY đã in cũng đổi theo, nếu không tổng số con của đơn đếm sai. Mâm lẻ cuối
+/// và lượt in bù không phải mâm đầy nên giữ nguyên.
+ResplitPlan chiaLaiGiuTienDo(
+  List<BulkRun> runs,
+  int tongMoi,
+  List<String> printerIds,
+  List<int> sucChuaMoiMay, {
+  bool suaLuotDaChay = true,
+}) {
+  final khoa =
+      runs.where((r) => r.isRework || r.status != BulkStatus.pending).toList();
+  final thayDuoc = runs
+      .where((r) => !r.isRework && r.status == BulkStatus.pending)
+      .toList()
+    ..sort((a, b) => a.seq.compareTo(b.seq));
+
+  // Sức chứa mâm CŨ của từng máy = lượt đầy nhất của máy đó (lượt cuối có thể lẻ).
+  final sucChuaCu = <String, int>{};
+  for (final run in runs) {
+    final id = run.printerId;
+    if (id == null || run.isRework) continue;
+    if ((sucChuaCu[id] ?? 0) < run.quantity) sucChuaCu[id] = run.quantity;
+  }
+  final sucChuaMoi = <String, int>{
+    for (var i = 0; i < printerIds.length; i++) printerIds[i]: sucChuaMoiMay[i],
+  };
+
+  /// Số con của lượt đã chạy sau khi sửa nhầm (không bật thì giữ nguyên).
+  int soConSauSua(BulkRun run) {
+    final id = run.printerId;
+    if (!suaLuotDaChay || run.isRework || id == null) return run.quantity;
+    final cu = sucChuaCu[id];
+    final moi = sucChuaMoi[id];
+    // Máy bị bỏ khỏi đơn thì không biết sức chứa mới; mâm lẻ cuối không phải mâm đầy.
+    if (moi == null || cu == null || run.quantity != cu) return run.quantity;
+    return moi;
+  }
+
+  final suaDaChay = <({int cu, int moi})>[];
+  for (final run in khoa) {
+    final moi = soConSauSua(run);
+    if (moi != run.quantity) suaDaChay.add((cu: run.quantity, moi: moi));
+  }
+
+  // Lượt bù không nằm trong kế hoạch gốc nên không trừ vào tổng số con của đơn.
+  final daKhoa = khoa
+      .where((r) => !r.isRework)
+      .fold<int>(0, (s, r) => s + soConSauSua(r));
+  final conLai = tongMoi - daKhoa < 0 ? 0 : tongMoi - daKhoa;
+
+  var seqMax = 0;
+  final peiMax = <String, int>{};
+  for (final run in khoa) {
+    if (run.seq > seqMax) seqMax = run.seq;
+    final id = run.printerId;
+    if (id == null) continue;
+    if ((peiMax[id] ?? 0) < run.peiIndex) peiMax[id] = run.peiIndex;
+  }
+
+  final luotMoi = chiaLuotInTheoMay(conLai, sucChuaMoiMay)
+      .map((l) => PlannedRun(
+            seq: seqMax + l.seq,
+            printerIndex: l.printerIndex,
+            peiIndex: (peiMax[printerIds[l.printerIndex]] ?? 0) + l.peiIndex,
+            quantity: l.quantity,
+          ))
+      .toList();
+
+  final dungLaiMa =
+      luotMoi.length < thayDuoc.length ? luotMoi.length : thayDuoc.length;
+
+  return ResplitPlan(
+    giuNguyen: khoa.length,
+    suaDaChay: suaDaChay,
+    daKhoa: daKhoa,
+    dungLaiMa: dungLaiMa,
+    themMoi: luotMoi.length - dungLaiMa,
+    xoa: thayDuoc.length - dungLaiMa,
+    luotMoi: luotMoi,
+  );
 }
 
 /// Chia lượt khi mọi máy dùng chung một số con/mâm.

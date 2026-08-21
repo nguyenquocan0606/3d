@@ -15,8 +15,8 @@ export async function GET(
     }
 
     return NextResponse.json({ status: 'success', data: status });
-  } catch (error: any) {
+  } catch (error) {
     console.error('[API Printer Status] Error:', error);
-    return NextResponse.json({ status: 'error', message: error.message || 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ status: 'error', message: (error instanceof Error ? error.message : 'Internal Server Error') }, { status: 500 });
   }
 }

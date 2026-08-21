@@ -102,6 +102,63 @@ export class InventoryService {
   }
 
   /**
+   * Bỏ ghi nhận 1 cuộn khỏi phiên đang chạy — dùng cho nút "Hoàn tác" khi người
+   * kiểm quét nhầm cuộn bên cạnh. Không truyền spoolId thì xoá lượt quét gần
+   * nhất của phiên (theo `scannedAt`).
+   */
+  static async unscanSpool(spoolId?: string): Promise<ServiceResult<any>> {
+    try {
+      const session = await prisma.inventorySession.findFirst({
+        where: { active: true },
+      });
+      if (!session) {
+        return { success: false, error: 'Chưa có phiên kiểm kho nào đang chạy' };
+      }
+
+      const item = await prisma.inventoryItem.findFirst({
+        where: spoolId
+          ? { sessionId: session.id, spoolId: spoolId.trim() }
+          : { sessionId: session.id },
+        orderBy: { scannedAt: 'desc' },
+      });
+
+      if (!item) {
+        return {
+          success: false,
+          error: spoolId
+            ? `Cuộn "${spoolId}" chưa được quét trong phiên này`
+            : 'Phiên này chưa quét cuộn nào để hoàn tác',
+        };
+      }
+
+      await prisma.inventoryItem.delete({ where: { id: item.id } });
+
+      const spool = await prisma.spool.findUnique({
+        where: { id: item.spoolId },
+        include: { filament: true },
+      });
+
+      return {
+        success: true,
+        data: {
+          item,
+          spool: spool && {
+            id: spool.id,
+            filamentType: spool.filament.type,
+            filamentColorName: spool.filament.colorName,
+            filamentColorHex: spool.filament.colorHex,
+            filamentBrand: spool.filament.brand,
+            remainingWeightG: spool.remainingWeightG,
+          },
+        },
+      };
+    } catch (error) {
+      console.error('Error unscanning spool:', error);
+      return { success: false, error: 'Lỗi cơ sở dữ liệu khi hoàn tác lượt quét' };
+    }
+  }
+
+  /**
    * Resets the current inventory check by archiving (active = false)
    * the active session and spawning a new active session.
    */

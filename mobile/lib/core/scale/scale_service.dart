@@ -98,6 +98,18 @@ class ScaleNotifier extends Notifier<ScaleState> {
   Future<void> calibrateTo(double target) => setOffset(target - state.rawWeight);
 
   Future<void> _connect(AppSettings settings) async {
+    // Máy không dùng cân (PDA ngoài kho) thì đóng hẳn socket thay vì để nó chạy
+    // nền suốt ngày. Phải `_teardown` chứ không chỉ `return`: người dùng có thể
+    // vừa tắt công tắc trong khi kết nối đang sống.
+    if (!settings.scaleEnabled) {
+      _teardown();
+      state = state.copyWith(
+        connection: ScaleConnection.disconnected,
+        lastError: 'Đã tắt trạm cân trong Cài đặt.',
+      );
+      return;
+    }
+
     final url = settings.effectiveMqttUrl;
     if (url.isEmpty) {
       state = state.copyWith(
@@ -189,6 +201,9 @@ class ScaleNotifier extends Notifier<ScaleState> {
   }
 
   void _teardown() {
+    // Quên luôn broker đang nối: đóng xong mà còn nhớ thì lần bật lại có thể bị
+    // hiểu nhầm là "đã nối rồi" và bỏ qua việc nối lại.
+    _connectedTo = null;
     _retryTimer?.cancel();
     _retryTimer = null;
     _subscription?.cancel();

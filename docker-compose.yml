@@ -28,5 +28,30 @@ services:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
 
+  # Worker Zalo: giữ phiên đăng nhập của các tài khoản Zalo và đẩy tin nhắn vào Postgres.
+  # Chạy nền độc lập với console — đóng terminal hay logout đều không ảnh hưởng.
+  zalo-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.zalo-worker
+    container_name: 3d_manage_zalo_worker
+    depends_on:
+      - postgres
+    environment:
+      # Trong mạng của compose, Postgres có tên là `postgres` — KHÁC với DATABASE_URL ở .env
+      # (cái đó trỏ localhost, dành cho app Next chạy trên máy chủ).
+      DATABASE_URL: postgresql://postgres:mysecretpassword@postgres:5432/filament_db?schema=public
+      ZALO_WORKER_TOKEN: ${ZALO_WORKER_TOKEN}
+      ZALO_ATTACHMENT_DIR: /app/data/zalo-attachments
+      TZ: Asia/Ho_Chi_Minh
+    ports:
+      # Chỉ mở ra 127.0.0.1 của máy chủ: app Next gọi vào được, ngoài mạng LAN thì không.
+      - "127.0.0.1:39200:39200"
+    volumes:
+      # Bind mount (không phải named volume) vì app Next chạy NGOÀI Docker cũng phải đọc được
+      # đúng những file này để phục vụ route /api/zalo/attachments.
+      - ./data/zalo-attachments:/app/data/zalo-attachments
+    restart: unless-stopped
+
 volumes:
   postgres_data:

@@ -1,0 +1,36 @@
+# Worker Zalo — tiến trình nền giữ phiên Zalo và đẩy tin nhắn vào Postgres.
+#
+# Chỉ đóng gói worker, KHÔNG đóng gói app Next: web vẫn chạy trên máy chủ như cũ. Lý do tách:
+# worker cần sống liên tục và tự dựng lại khi rớt, còn web thì hay restart lúc sửa code — nhốt
+# chung một container thì mỗi lần restart web là phiên Zalo đứt.
+#
+# Dùng bookworm-slim (Debian 12, glibc + OpenSSL 3) vì engine của Prisma cần đúng bộ này;
+# bản alpine dùng musl, phải đổi binaryTargets mới chạy.
+FROM node:20-bookworm-slim
+
+# openssl: Prisma engine cần. ca-certificates: gọi HTTPS tới Zalo để tải ảnh/file đính kèm.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Cài phụ thuộc trước, copy code sau — sửa code thì Docker dùng lại lớp cache này, build lại rất nhanh.
+# --legacy-peer-deps: dự án có sẵn xung đột lucide-react (đòi React ≤18) với React 19, không liên
+# quan tới worker nhưng npm vẫn chặn nếu không có cờ này.
+# Giữ cả devDependencies vì cần Prisma CLI để `generate`, và lấy đúng phiên bản trong lockfile
+# thay vì tải bản khác qua npx.
+COPY package.json package-lock.json ./
+RUN npm ci --legacy-peer-deps
+
+# Sinh Prisma Client cho đúng nền tảng của image (engine trên máy chủ có thể khác).
+COPY prisma ./prisma
+RUN npx prisma generate
+
+COPY scripts ./scripts
+
+# Chạy bằng user thường thay vì root: file đính kèm worker ghi ra volume sẽ thuộc user 1000 —
+# đúng chủ sở hữu để app Next trên máy chủ đọc và để bạn xóa được bằng tay.
+USER node
+
+CMD ["node", "scripts/zalo-worker.mjs"]

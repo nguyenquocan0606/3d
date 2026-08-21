@@ -1,17 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/scan/code_normalizer.dart';
+import '../../core/scan/pda_scan.dart';
+import '../../core/scan/scan_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../../data/models/filament.dart';
+import '../../data/models/order.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/label_repository.dart';
+import '../production/pei_sheet_detail_screen.dart';
+import '../scanner/scanner_screen.dart';
+import '../spools/color_detail_screen.dart';
+import 'label_payload.dart';
 
 enum LabelSource {
   spool('Cuộn nhựa'),
+  color('Mã màu nhựa'),
   location('Kho lưu trữ'),
   printer('Máy in'),
   printerSlot('Slot AMS của máy in'),
+  peiSheet('Mâm in PEI'),
   custom('Tự nhập');
 
   const LabelSource(this.label);
@@ -23,6 +33,11 @@ enum LabelSource {
 /// Máy in nhiệt XPrinter cắm USB vào máy chủ chứ không phải điện thoại, nên màn
 /// này chỉ chọn nội dung rồi gửi lệnh — server sinh TSPL và in. Xem trước ở đây là
 /// mô phỏng bố cục tem 40×30mm, không phải bản in pixel-perfect như tab In Tem web.
+///
+/// Hai lối vào, hai tình huống khác nhau:
+///  - **Quét để in lại**: tem trên kệ mờ/rách, quét cái cũ là ra cái mới y hệt.
+///    Đây là việc hay làm nhất, nên đặt ngay đầu màn và in luôn không hỏi lại.
+///  - **Chọn thủ công**: in tem cho thứ chưa từng có tem, hoặc tem tự nhập.
 class LabelsScreen extends ConsumerStatefulWidget {
   const LabelsScreen({super.key});
 
@@ -36,6 +51,7 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
   int _slot = 1;
   bool _busy = false;
 
+  final _reprintController = TextEditingController();
   final _qrController = TextEditingController();
   final _line1Controller = TextEditingController();
   final _line2Controller = TextEditingController();
@@ -43,6 +59,7 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
 
   @override
   void dispose() {
+    _reprintController.dispose();
     _qrController.dispose();
     _line1Controller.dispose();
     _line2Controller.dispose();
@@ -62,6 +79,30 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
               line1: spool.id,
               line2: spool.filamentType,
               line3: spool.filamentColorName,
+            );
+          }
+        }
+        return null;
+
+      case LabelSource.color:
+        final name = _selectedId;
+        if (name == null) return null;
+        return (
+          qr: colorTagCode(name),
+          line1: colorTagCode(name),
+          line2: 'MÃ MÀU NHỰA',
+          line3: name,
+        );
+
+      case LabelSource.peiSheet:
+        final sheets = ref.read(peiSheetsProvider).valueOrNull ?? const <PeiSheet>[];
+        for (final sheet in sheets) {
+          if (sheet.id == _selectedId) {
+            return (
+              qr: peiSheetCode(sheet.id),
+              line1: 'PEI',
+              line2: 'MAM IN PEI',
+              line3: sheet.name,
             );
           }
         }
@@ -145,8 +186,52 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
     }
   }
 
+  /// Quét tem cũ → in ra tem mới y hệt, không hỏi lại.
+  ///
+  /// Người đứng cạnh máy in cầm tem mờ trên tay: chỉ có đúng một việc muốn làm.
+  /// Bản web (tab "In Tem QR Code") cũng in thẳng như vậy.
+  Future<String?> _reprint(String code) async {
+    final scanned = ref.read(codeNormalizerProvider).classify(code);
+    if (scanned.kind == ScanKind.unknown) {
+      throw ScanFailure('Không nhận ra mã "${code.trim()}".');
+    }
+
+    final payload = labelPayloadFor(ref, scanned);
+    setState(() => _busy = true);
+    try {
+      await printLabelPayload(ref, payload);
+      return 'Đã in lại tem ${payload.qr}.';
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _scanToReprint() async {
+    final code = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => const ScannerScreen(
+          title: 'Quét tem cần in lại',
+          hint: 'Cuộn nhựa · Tem màu · Kho · Máy in · Khay AMS · Mâm PEI',
+        ),
+      ),
+    );
+    if (code == null || !mounted) return;
+
+    try {
+      final message = await _reprint(code);
+      if (mounted && message != null) showToast(context, message);
+    } catch (error) {
+      if (mounted) showToast(context, '$error', isError: true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Máy PDA: đứng ngay đây bóp cò từng tem mờ trên kệ là in lại cả loạt.
+    return PdaScanScope(onCode: _reprint, child: _buildScreen(context));
+  }
+
+  Widget _buildScreen(BuildContext context) {
     final payload = _buildPayload();
 
     return Scaffold(
@@ -154,6 +239,8 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: [
+          _reprintCard(),
+          const SizedBox(height: 16),
           const SectionCard(
             child: Row(
               children: [
@@ -169,9 +256,17 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
               ],
             ),
           ),
-          const SizedBox(height: 16),
-          const Text('Nguồn dữ liệu', style: TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
+          const SizedBox(height: 20),
+          const Text(
+            'Hoặc chọn thủ công',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Dùng khi in tem lần đầu cho thứ chưa có tem dán.',
+            style: TextStyle(fontSize: 12.5, color: AppColors.muted),
+          ),
+          const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -252,6 +347,71 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
     );
   }
 
+  /// Ô quét/nhập mã để in lại — việc hay làm nhất nên nằm ngay đầu màn.
+  Widget _reprintCard() {
+    return SectionCard(
+      borderColor: AppColors.indigo.withValues(alpha: 0.5),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.qr_code_scanner_rounded, color: AppColors.indigoLight),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Quét để in lại',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Tem mờ hay rách: quét cái cũ là in ra cái mới y hệt, không hỏi lại.',
+            style: TextStyle(fontSize: 12.5, color: AppColors.muted, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _reprintController,
+                  autocorrect: false,
+                  textCapitalization: TextCapitalization.characters,
+                  textInputAction: TextInputAction.done,
+                  decoration: const InputDecoration(
+                    hintText: 'Hoặc nhập mã tem',
+                    prefixIcon: Icon(Icons.keyboard_rounded),
+                    isDense: true,
+                  ),
+                  onSubmitted: _submitReprintField,
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filled(
+                tooltip: 'Quét tem cần in lại',
+                onPressed: _busy ? null : _scanToReprint,
+                icon: const Icon(Icons.qr_code_scanner_rounded),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _submitReprintField(String value) async {
+    if (value.trim().isEmpty) return;
+    _reprintController.clear();
+    try {
+      final message = await _reprint(value);
+      if (mounted && message != null) showToast(context, message);
+    } catch (error) {
+      if (mounted) showToast(context, '$error', isError: true);
+    }
+  }
+
   Widget _picker() {
     final options = switch (_source) {
       LabelSource.spool => (ref.watch(spoolsProvider).valueOrNull ?? const <Spool>[])
@@ -268,6 +428,17 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
       LabelSource.printerSlot =>
         (ref.watch(printersProvider).valueOrNull ?? const [])
             .map((p) => (id: p.id, title: p.name, subtitle: p.id))
+            .toList(),
+      // Màu không phải một bảng riêng — gom từ chính các cuộn đang có.
+      LabelSource.color => (ref.watch(spoolsProvider).valueOrNull ?? const <Spool>[])
+          .map((s) => s.filamentColorName)
+          .where((name) => name.isNotEmpty)
+          .toSet()
+          .map((name) => (id: name, title: name, subtitle: colorTagCode(name)))
+          .toList(),
+      LabelSource.peiSheet =>
+        (ref.watch(peiSheetsProvider).valueOrNull ?? const <PeiSheet>[])
+            .map((s) => (id: s.id, title: s.name, subtitle: '${s.items.length} miếng'))
             .toList(),
       LabelSource.custom => const <({String id, String subtitle, String title})>[],
     };

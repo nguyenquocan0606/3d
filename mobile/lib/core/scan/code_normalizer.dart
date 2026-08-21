@@ -11,6 +11,7 @@ enum ScanKind {
   bulkRun,
   printItem,
   storeProduct,
+  eshopOrder,
   command,
   unknown,
 }
@@ -82,6 +83,7 @@ class CodeNormalizer {
     this.storeCodes = const {},
     this.peiSheetIds = const {},
     this.orderCodes = const {},
+    this.eshopOrderCodes = const {},
     this.bulkOrderCodes = const {},
     this.bulkRunIds = const {},
     this.colorNames = const {},
@@ -100,6 +102,9 @@ class CodeNormalizer {
 
   /// Mã đơn hàng (`orderCode`) và uuid đơn — dùng cho tem mã đơn dán trên thùng.
   final Set<String> orderCodes;
+
+  /// Mã đơn Eshop sàn (ecomOrderNo, deliveryCode, refNo).
+  final Set<String> eshopOrderCodes;
 
   /// Mã đơn sản xuất số lượng lớn (`SLL-001`) và uuid đơn.
   final Set<String> bulkOrderCodes;
@@ -204,6 +209,11 @@ class CodeNormalizer {
     final bulkOrder = _match(bulkOrderCodes, normalized);
     if (bulkOrder != null) {
       return ScannedCode(raw: raw, kind: ScanKind.bulkOrder, id: bulkOrder);
+    }
+
+    final eshopOrder = _match(eshopOrderCodes, normalized);
+    if (eshopOrder != null) {
+      return ScannedCode(raw: raw, kind: ScanKind.eshopOrder, id: eshopOrder);
     }
 
     return ScannedCode(raw: raw, kind: ScanKind.unknown);

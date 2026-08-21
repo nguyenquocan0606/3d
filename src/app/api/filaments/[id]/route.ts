@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { FilamentService } from '@/services/filament.service';
+import { ghiBiaMo } from '@/services/sync.service';
+import { baoThayDoi } from '@/services/sync-notify.service';
 
 export async function DELETE(
   request: Request,
@@ -20,6 +22,9 @@ export async function DELETE(
 
   const result = await FilamentService.deleteFilament(id);
   if (result.success) {
+    await ghiBiaMo('filaments', id);
+    // Xóa loại nhựa kéo theo mọi cuộn của nó (Cascade).
+    void baoThayDoi(['filaments', 'spools']);
     return NextResponse.json({
       status: 'success',
       data: true,

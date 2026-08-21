@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/format/formatters.dart';
+import '../../core/scan/pda_scan.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../../data/models/filament.dart';
@@ -30,10 +33,44 @@ class InventoryScreen extends ConsumerStatefulWidget {
   ConsumerState<InventoryScreen> createState() => _InventoryScreenState();
 }
 
+/// Một dòng phản hồi ngay dưới thanh tiêu đề: cuộn vừa quét là con nào.
+///
+/// Toast hệ thống nổi ở đáy màn, chỗ đó lại bị nút "Quét kiểm" che — người đứng
+/// kiểm kho cầm máy ngang tầm mắt không kịp đọc. Dải này nằm ngay trên ô tiến độ,
+/// đúng chỗ mắt đang nhìn.
+typedef _ScanFeedback = ({
+  String title,
+  String? subtitle,
+  String? colorHex,
+  bool isError,
+});
+
 class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   ScanFilter _filter = ScanFilter.all;
   bool _showAllStatuses = false;
   String _query = '';
+
+  /// Hiện 2 giây rồi tự tắt; quét con tiếp theo thì thay luôn nội dung cũ.
+  _ScanFeedback? _feedback;
+  Timer? _feedbackTimer;
+  bool _undoing = false;
+
+  static const _feedbackDuration = Duration(seconds: 2);
+
+  @override
+  void dispose() {
+    _feedbackTimer?.cancel();
+    super.dispose();
+  }
+
+  void _showFeedback(_ScanFeedback feedback) {
+    if (!mounted) return;
+    _feedbackTimer?.cancel();
+    setState(() => _feedback = feedback);
+    _feedbackTimer = Timer(_feedbackDuration, () {
+      if (mounted) setState(() => _feedback = null);
+    });
+  }
 
   List<Spool> _apply(List<Spool> spools, Map<String, bool> scanned) {
     final query = _query.trim().toLowerCase();
@@ -90,8 +127,57 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     }
 
     final result = await ref.read(inventorySessionProvider.notifier).scan(spoolId);
+    _showFeedback((
+      title: result.spoolId,
+      subtitle: '${result.filamentType} ${result.colorName} · '
+          '${Fmt.grams(result.remainingWeightG)}',
+      colorHex: result.colorHex,
+      isError: false,
+    ));
     return '✔ ${result.spoolId} · ${result.filamentType} ${result.colorName} · '
         '${Fmt.grams(result.remainingWeightG)}';
+  }
+
+  /// Bản dùng cho máy PDA: phản hồi đã nằm ở dải trên màn (kể cả lỗi) nên tắt
+  /// toast của [PdaScanScope], khỏi hiện hai lần cùng một câu.
+  Future<String?> _handlePdaScan(String code) async {
+    try {
+      return await _handleScan(code);
+    } catch (error) {
+      _showFeedback((
+        title: '$error',
+        subtitle: null,
+        colorHex: null,
+        isError: true,
+      ));
+      rethrow; // Để scope rung báo lỗi.
+    }
+  }
+
+  /// Hoàn tác lượt quét gần nhất — quét nhầm cuộn bên cạnh thì bấm một nút là xong.
+  Future<void> _undoLastScan() async {
+    if (_undoing) return;
+    setState(() => _undoing = true);
+    try {
+      final result = await ref.read(inventorySessionProvider.notifier).undoLastScan();
+      _showFeedback((
+        title: 'Đã bỏ ${result.spoolId}',
+        subtitle: result.colorName.isEmpty
+            ? 'Cuộn này trở lại danh sách chưa quét'
+            : '${result.filamentType} ${result.colorName} · chưa quét trở lại',
+        colorHex: result.colorHex,
+        isError: false,
+      ));
+    } catch (error) {
+      _showFeedback((
+        title: '$error',
+        subtitle: null,
+        colorHex: null,
+        isError: true,
+      ));
+    } finally {
+      if (mounted) setState(() => _undoing = false);
+    }
   }
 
   Future<void> _resetSession() async {
@@ -112,6 +198,15 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Máy PDA: đứng ngay đây bóp cò từng cuộn trên kệ, khỏi mở màn quét.
+    return PdaScanScope(
+      onCode: _handlePdaScan,
+      showFeedback: false,
+      child: _buildScreen(context),
+    );
+  }
+
+  Widget _buildScreen(BuildContext context) {
     final sessionAsync = ref.watch(inventorySessionProvider);
     final spools = ref.watch(spoolsProvider).valueOrNull ?? const <Spool>[];
     final scanned = sessionAsync.valueOrNull?.scannedMap ?? const <String, bool>{};
@@ -123,10 +218,23 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     final scannedCount = relevant.where((s) => scanned[s.id] ?? false).length;
     final ratio = relevant.isEmpty ? 0.0 : scannedCount / relevant.length;
 
+    final hasScans = sessionAsync.valueOrNull?.items.isNotEmpty ?? false;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Kiểm kho'),
         actions: [
+          IconButton(
+            tooltip: 'Hoàn tác lượt quét gần nhất',
+            onPressed: hasScans && !_undoing ? _undoLastScan : null,
+            icon: _undoing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.undo_rounded),
+          ),
           IconButton(
             tooltip: 'Phiên mới',
             onPressed: _resetSession,
@@ -150,6 +258,11 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
       ),
       body: Column(
         children: [
+          if (_feedback != null)
+            _ScanFeedbackBar(
+              feedback: _feedback!,
+              onUndo: hasScans && !_undoing ? _undoLastScan : null,
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
             child: SectionCard(
@@ -271,6 +384,68 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
               },
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Dải phản hồi cuộn vừa quét. Chữ to, chấm màu đúng màu nhựa để đối chiếu
+/// nhanh với cuộn đang cầm trên tay, kèm nút hoàn tác ngay cạnh.
+class _ScanFeedbackBar extends StatelessWidget {
+  const _ScanFeedbackBar({required this.feedback, this.onUndo});
+
+  final _ScanFeedback feedback;
+  final VoidCallback? onUndo;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = feedback.isError ? AppColors.danger : AppColors.success;
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: accent.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        children: [
+          if (feedback.isError)
+            const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 20)
+          else if (feedback.colorHex != null)
+            ColorDot(hex: feedback.colorHex, size: 20)
+          else
+            const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  feedback.title,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: accent,
+                  ),
+                ),
+                if (feedback.subtitle != null)
+                  Text(
+                    feedback.subtitle!,
+                    style: const TextStyle(color: AppColors.muted, fontSize: 13),
+                  ),
+              ],
+            ),
+          ),
+          if (onUndo != null)
+            TextButton.icon(
+              onPressed: onUndo,
+              icon: const Icon(Icons.undo_rounded, size: 18),
+              label: const Text('Hoàn tác'),
+            ),
         ],
       ),
     );

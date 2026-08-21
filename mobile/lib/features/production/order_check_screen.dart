@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/scan/pda_scan.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../../data/models/order.dart';
@@ -98,8 +99,28 @@ class _OrderCheckScreenState extends ConsumerState<OrderCheckScreen> {
     return '✔ ${target.name} — ${updated.checkedItems}/${updated.totalItems}';
   }
 
+  /// Máy PDA quét thẳng vào màn, không qua nút "Quét".
+  ///
+  /// Một cò cho cả hai bước của luồng kiểm hàng: chưa chọn đơn thì mã đầu tiên là
+  /// mã đơn, chọn xong rồi thì mọi mã sau đó là tem trong thùng.
+  Future<String?> _handlePdaScan(String code) async {
+    if (_order != null) return _checkItem(code);
+
+    await _loadOrder(code);
+    final order = _order;
+    if (order == null) {
+      throw Exception(_error ?? 'Không tìm thấy đơn hàng mã ${code.trim()}.');
+    }
+    _codeController.text = code.trim();
+    return 'Đã mở đơn ${order.displayCode} — quét tiếp từng tem trong thùng.';
+  }
+
   @override
   Widget build(BuildContext context) {
+    return PdaScanScope(onCode: _handlePdaScan, child: _buildScreen(context));
+  }
+
+  Widget _buildScreen(BuildContext context) {
     final order = _order;
 
     return Scaffold(

@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { X, Printer, Scan, Trash2 } from 'lucide-react';
+import { KetNoiFields, type CauHinhKetNoi } from '@/components/Printer/ket-noi-fields';
 
 interface ManagePrinterModalProps {
   isOpen: boolean;
@@ -24,6 +25,7 @@ export default function ManagePrinterModal({
 }: ManagePrinterModalProps) {
   const [editName, setEditName] = React.useState('');
   const [editModel, setEditModel] = React.useState('');
+  const [ketNoi, setKetNoi] = React.useState<CauHinhKetNoi>({ lanIp: '', lanAccessCode: '', lanSerial: '', cloudPrinterId: '' });
   const [editing, setEditing] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState('');
@@ -32,6 +34,14 @@ export default function ManagePrinterModal({
     if (printer && isOpen) {
       setEditName(printer.name || '');
       setEditModel(printer.model || '');
+      // Access Code cố tình luôn rỗng: máy chủ không trả mã đã lưu về client, và để trống nghĩa là
+      // giữ nguyên mã cũ.
+      setKetNoi({
+        lanIp: printer.lanIp || '',
+        lanAccessCode: '',
+        lanSerial: printer.lanSerial || '',
+        cloudPrinterId: printer.cloudPrinterId || '',
+      });
       setEditing(false);
       setError('');
     }
@@ -54,6 +64,10 @@ export default function ManagePrinterModal({
         body: JSON.stringify({
           name: editName.trim(),
           model: editModel.trim() || null,
+          lanIp: ketNoi.lanIp || null,
+          lanAccessCode: ketNoi.lanAccessCode || null,
+          lanSerial: ketNoi.lanSerial || null,
+          cloudPrinterId: ketNoi.cloudPrinterId || null,
         }),
       });
 
@@ -172,6 +186,11 @@ export default function ManagePrinterModal({
                     className="w-full bg-white dark:bg-[#111827] border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-hidden focus:border-indigo-500"
                   />
                 </div>
+                <KetNoiFields
+                  giaTri={ketNoi}
+                  onChange={setKetNoi}
+                  daCoAccessCode={Boolean(printer.coAccessCode)}
+                />
                 <div className="flex gap-2">
                   <div className="flex-1 h-9">
                     <button
@@ -179,7 +198,7 @@ export default function ManagePrinterModal({
                       disabled={saving}
                       className="w-full h-full bg-indigo-650 hover:bg-indigo-600 text-slate-900 dark:text-white font-medium text-xs rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
                     >
-                      {saving ? 'Đang lưu...' : 'Lưu thay đổi'}
+                      {saving ? 'Đang kiểm tra kết nối…' : 'Lưu thay đổi'}
                     </button>
                   </div>
                   <div className="h-9">
