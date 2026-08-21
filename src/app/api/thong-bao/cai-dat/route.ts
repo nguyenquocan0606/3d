@@ -4,12 +4,14 @@ import { LOAI_SU_KIEN, layCaiDat, luuCaiDat } from '@/services/thong-bao.service
 
 /** GET /api/thong-bao/cai-dat — cấu hình hiện tại + danh mục loại sự kiện để UI dựng danh sách. */
 export async function GET() {
-  const caiDat = await layCaiDat();
+  const { discordWebhook, ...caiDat } = await layCaiDat();
 
   return NextResponse.json({
     status: 'success',
     data: {
-      caiDat,
+      // Webhook là bí mật: ai có địa chỉ đó là đăng được vào kênh Discord của xưởng. Client chỉ
+      // cần biết đã cấu hình hay chưa, giống cách xử lý Access Code của máy in.
+      caiDat: { ...caiDat, coDiscordWebhook: Boolean(discordWebhook) },
       firebaseSanSang: await fcmDaCauHinh(),
       danhMucLoai: Object.entries(LOAI_SU_KIEN).map(([key, v]) => ({
         loai: key,
@@ -42,8 +44,43 @@ export async function PUT(request: Request) {
         (l): l is string => typeof l === 'string' && hopLe.includes(l),
       );
     }
-    if (body.nguongZalo === 'tin' || body.nguongZalo === 'canhBao' || body.nguongZalo === 'loi') {
+    const NGUONG = ['tin', 'canhBao', 'loi'];
+    if (typeof body.nguongZalo === 'string' && NGUONG.includes(body.nguongZalo)) {
       data.nguongZalo = body.nguongZalo;
+    }
+
+    if (typeof body.guiDiscord === 'boolean') data.guiDiscord = body.guiDiscord;
+    if (typeof body.discordWebhook === 'string' || body.discordWebhook === null) {
+      const url = typeof body.discordWebhook === 'string' ? body.discordWebhook.trim() : null;
+      // Chỉ nhận đúng webhook của Discord: dán nhầm URL khác thì mỗi thông báo là một request đi
+      // tới nơi lạ, kèm theo cả tên đơn hàng và ảnh trong xưởng.
+      if (url && !/^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\//.test(url)) {
+        return NextResponse.json(
+          { status: 'error', message: 'Địa chỉ webhook phải bắt đầu bằng https://discord.com/api/webhooks/' },
+          { status: 400 },
+        );
+      }
+      data.discordWebhook = url || null;
+    }
+    if (typeof body.nguongDiscord === 'string' && NGUONG.includes(body.nguongDiscord)) {
+      data.nguongDiscord = body.nguongDiscord;
+    }
+    if (typeof body.anhTheoLop === 'boolean') data.anhTheoLop = body.anhTheoLop;
+    if (typeof body.soAnhMoiLop === 'number') {
+      data.soAnhMoiLop = Math.min(3, Math.max(1, Math.round(body.soAnhMoiLop)));
+    }
+    if (typeof body.phutToiThieuGiuaAnh === 'number') {
+      data.phutToiThieuGiuaAnh = Math.min(120, Math.max(0, Math.round(body.phutToiThieuGiuaAnh)));
+    }
+
+    if (data.guiDiscord === true) {
+      const hienTai = await layCaiDat();
+      if (!(data.discordWebhook ?? hienTai.discordWebhook)) {
+        return NextResponse.json(
+          { status: 'error', message: 'Dán địa chỉ webhook Discord trước khi bật.' },
+          { status: 400 },
+        );
+      }
     }
 
     if (data.guiZalo === true && !data.zaloThreadId) {
@@ -59,8 +96,11 @@ export async function PUT(request: Request) {
     // Người dùng có thể vừa copy file service account vào `data/` — cho nạp lại mà không restart.
     quenCauHinhFcm();
 
-    const caiDat = await luuCaiDat(data);
-    return NextResponse.json({ status: 'success', data: caiDat });
+    const { discordWebhook: daLuu, ...caiDat } = await luuCaiDat(data);
+    return NextResponse.json({
+      status: 'success',
+      data: { ...caiDat, coDiscordWebhook: Boolean(daLuu) },
+    });
   } catch (error) {
     console.error('[API Thông báo] Lỗi lưu cài đặt:', error);
     return NextResponse.json({ status: 'error', message: 'Không lưu được cài đặt.' }, { status: 500 });

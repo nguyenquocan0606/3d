@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { bocAnh, soMam } from '../printer-integration/providers/bambu/anh-preview';
+import { bocAnh, docTongKet, soMam } from '../printer-integration/providers/bambu/doc-3mf';
 
 /**
  * File 3MF trên máy in là ZIP, và mình cố tình chỉ tải vài trăm KB đầu — nghĩa là **không có**
@@ -78,5 +78,45 @@ describe('soMam', () => {
 
   it('tên không có hậu tố mâm thì mặc định mâm 1', () => {
     expect(soMam('mu_coi (1) (1).3mf')).toBe(1);
+  });
+});
+
+describe('docTongKet', () => {
+  /// Hai dòng này slicer ghi sẵn ở đầu gcode — chép nguyên từ bản in mũ cối thật trên A1-1.
+  const THAT = [
+    '; HEADER_BLOCK_START',
+    '; BambuStudio 02.08.00.50',
+    '; model printing time: 11h 48m 26s; total estimated time: 11h 54m 41s',
+    '; total filament weight [g] : 8.47,161.29,16.76,8.84',
+    '; HEADER_BLOCK_END',
+  ].join('\n');
+
+  it('đọc đúng khối lượng từng filament và tổng', () => {
+    const ra = docTongKet(THAT)!;
+    expect(ra.gramTheoFilament).toEqual([8.47, 161.29, 16.76, 8.84]);
+    expect(ra.tongGram).toBeCloseTo(195.36, 2);
+  });
+
+  it('đổi thời gian dự kiến ra giây', () => {
+    // Phải lấy "total estimated time" chứ không phải "model printing time" đứng trước nó — con số
+    // sau mới là cái Bambu Studio hiện cho người dùng.
+    expect(docTongKet(THAT)!.giayDuKien).toBe(11 * 3600 + 54 * 60 + 41);
+  });
+
+  it('bản in một màu vẫn ra đúng một phần tử', () => {
+    const ra = docTongKet('; total filament weight [g] : 42.5')!;
+    expect(ra.gramTheoFilament).toEqual([42.5]);
+    expect(ra.tongGram).toBe(42.5);
+  });
+
+  it('thiếu dòng khối lượng thì trả null, đừng đoán bừa', () => {
+    expect(docTongKet('; total estimated time: 1h 0m 0s')).toBeNull();
+    expect(docTongKet('')).toBeNull();
+  });
+
+  it('có khối lượng nhưng không có thời gian thì vẫn dùng được', () => {
+    const ra = docTongKet('; total filament weight [g] : 10,20')!;
+    expect(ra.tongGram).toBe(30);
+    expect(ra.giayDuKien).toBeNull();
   });
 });

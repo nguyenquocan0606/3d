@@ -2,6 +2,7 @@ import prisma from '@/utils/db';
 import { printerManager } from './printer-integration/PrinterManager';
 import type { PrinterStatusData } from './printer-integration/types';
 import { ghiVaGuiSuKien, type LoaiSuKien } from './thong-bao.service';
+import { ngoLop } from './anh-theo-lop';
 
 /**
  * Vòng giám sát máy in: cứ vài chục giây hỏi trạng thái mọi máy đã liên kết, so với lần trước, và
@@ -155,7 +156,14 @@ async function ban(
 }
 
 /** Xử lý một máy in trong một lần quét. Không bao giờ ném lỗi ra ngoài. */
-async function quetMotMay(printer: { id: string; name: string; cloudAccountId: string; cloudPrinterId: string }) {
+async function quetMotMay(printer: {
+  id: string;
+  name: string;
+  cloudAccountId: string;
+  cloudPrinterId: string;
+  lanIp: string | null;
+  lanAccessCode: string | null;
+}) {
   let st: PrinterStatusData | null = null;
   try {
     st = await printerManager.getStatusAsync(printer.cloudAccountId, printer.cloudPrinterId);
@@ -167,6 +175,15 @@ async function quetMotMay(printer: { id: string; name: string; cloudAccountId: s
     st ?? ({ status: 'offline', nozzleTemp: 0, nozzleTargetTemp: 0, bedTemp: 0, bedTargetTemp: 0, progress: 0 } as PrinterStatusData);
 
   const gon = gomTrangThai(hienTai);
+
+  // Ảnh camera theo lớp đi đường riêng: chụp mất mấy giây nên chạy nền, không chặn vòng quét.
+  ngoLop(
+    printer,
+    gon === 'in',
+    (hienTai.extendedInfo?.payload?.layer_num as number | undefined) ?? null,
+    hienTai.fileName ?? null,
+  );
+
   const bo = boNho.get(printer.id);
 
   const tienDo = Math.round(hienTai.progress || 0);
@@ -332,7 +349,14 @@ function dinhDangThoiGian(giay: number): string {
 export async function quetMotLuot() {
   const printers = await prisma.printer.findMany({
     where: { cloudAccountId: { not: null }, cloudPrinterId: { not: null } },
-    select: { id: true, name: true, cloudAccountId: true, cloudPrinterId: true },
+    select: {
+      id: true,
+      name: true,
+      cloudAccountId: true,
+      cloudPrinterId: true,
+      lanIp: true,
+      lanAccessCode: true,
+    },
   });
 
   // Máy đã gỡ liên kết thì bỏ khỏi bộ nhớ, tránh phình theo thời gian.
@@ -346,6 +370,8 @@ export async function quetMotLuot() {
         name: p.name,
         cloudAccountId: p.cloudAccountId as string,
         cloudPrinterId: p.cloudPrinterId as string,
+        lanIp: p.lanIp,
+        lanAccessCode: p.lanAccessCode,
       }).catch((e) => console.error(`[Giám sát máy in] Lỗi khi quét ${p.id}:`, e)),
     ),
   );

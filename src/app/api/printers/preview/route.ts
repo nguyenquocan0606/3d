@@ -1,5 +1,5 @@
 import prisma from '@/utils/db';
-import { layAnhPreview } from '@/services/printer-integration/providers/bambu/anh-preview';
+import { layAnhPreview } from '@/services/printer-integration/providers/bambu/doc-3mf';
 
 /**
  * Ảnh preview của bản in đang chạy, lấy thẳng từ máy in qua FTPS.

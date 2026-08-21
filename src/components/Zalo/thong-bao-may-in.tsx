@@ -18,6 +18,14 @@ type CaiDat = {
   zaloTenHoiThoai: string | null;
   loaiTat: string[];
   nguongZalo: string;
+  guiDiscord: boolean;
+  /// Máy chủ không trả webhook về — chỉ cho biết đã lưu hay chưa.
+  coDiscordWebhook: boolean;
+  discordWebhook?: string;
+  nguongDiscord: string;
+  anhTheoLop: boolean;
+  soAnhMoiLop: number;
+  phutToiThieuGiuaAnh: number;
 };
 
 type MucLoai = { loai: string; nhan: string; mucDo: string; icon: string };
@@ -304,6 +312,96 @@ export default function ThongBaoMayIn({ threads }: { threads: ThreadGon[] }) {
                   <option value="loi">Chỉ sự cố</option>
                 </select>
               </label>
+            </div>
+
+            <div className="space-y-2 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+              <label className="flex items-center gap-2 text-sm font-semibold">
+                <input
+                  type="checkbox"
+                  checked={caiDat.guiDiscord}
+                  onChange={(e) => void luu({ guiDiscord: e.target.checked })}
+                />
+                Gửi Discord
+              </label>
+              <p className="text-[11px] leading-relaxed text-slate-500">
+                Discord là kênh sổ cái — nhận mọi hoạt động và ảnh camera. Zalo để dành cho việc cần
+                chạy ra xem ngay.
+              </p>
+
+              <label className="space-y-1 text-xs text-slate-500">
+                <span>Địa chỉ webhook {caiDat.coDiscordWebhook && <em className="text-emerald-500">(đã lưu)</em>}</span>
+                <input
+                  type="text"
+                  defaultValue=""
+                  placeholder={
+                    caiDat.coDiscordWebhook
+                      ? 'Đã lưu — dán địa chỉ mới nếu muốn đổi'
+                      : 'https://discord.com/api/webhooks/…'
+                  }
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    if (v) void luu({ discordWebhook: v });
+                  }}
+                  className={`${LOP_NHAP} w-full font-mono text-[11px]`}
+                />
+              </label>
+
+              <label className="space-y-1 text-xs text-slate-500">
+                <span>Discord nhận từ mức</span>
+                <select
+                  value={caiDat.nguongDiscord}
+                  onChange={(e) => void luu({ nguongDiscord: e.target.value })}
+                  className={`${LOP_NHAP} w-full`}
+                >
+                  <option value="tin">Mọi hoạt động</option>
+                  <option value="canhBao">Cảnh báo trở lên</option>
+                  <option value="loi">Chỉ sự cố</option>
+                </select>
+              </label>
+
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={caiDat.anhTheoLop}
+                  onChange={(e) => void luu({ anhTheoLop: e.target.checked })}
+                />
+                Chụp ảnh camera mỗi lớp in xong
+              </label>
+
+              {caiDat.anhTheoLop && (
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="space-y-1 text-xs text-slate-500">
+                    <span>Số ảnh mỗi lần</span>
+                    <select
+                      value={caiDat.soAnhMoiLop}
+                      onChange={(e) => void luu({ soAnhMoiLop: Number(e.target.value) })}
+                      className={`${LOP_NHAP} w-full`}
+                    >
+                      <option value={1}>1 ảnh</option>
+                      <option value={2}>2 ảnh</option>
+                      <option value={3}>3 ảnh</option>
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-500">
+                    <span>Cách nhau ít nhất</span>
+                    <select
+                      value={caiDat.phutToiThieuGiuaAnh}
+                      onChange={(e) => void luu({ phutToiThieuGiuaAnh: Number(e.target.value) })}
+                      className={`${LOP_NHAP} w-full`}
+                    >
+                      <option value={0}>Không chặn</option>
+                      <option value={2}>2 phút</option>
+                      <option value={5}>5 phút</option>
+                      <option value={15}>15 phút</option>
+                      <option value={30}>30 phút</option>
+                    </select>
+                  </label>
+                </div>
+              )}
+              <p className="text-[11px] leading-relaxed text-slate-500">
+                Máy A1/P1 in một lớp mất khoảng 7 phút, nhưng bản in lớp mỏng có thể xong mỗi 20
+                giây — chốt chặn để khỏi ngập kênh.
+              </p>
             </div>
 
             <div>

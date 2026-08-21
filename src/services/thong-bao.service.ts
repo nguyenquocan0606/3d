@@ -1,6 +1,7 @@
 import prisma from '@/utils/db';
 import { guiFcm } from './fcm.service';
 import { guiTinNhan } from './zalo.service';
+import { guiDiscord } from './discord.service';
 
 /**
  * Nơi duy nhất biết cách biến một sự kiện máy in thành thông báo tới người.
@@ -58,6 +59,12 @@ export async function luuCaiDat(input: {
   zaloTenHoiThoai?: string | null;
   loaiTat?: string[];
   nguongZalo?: string;
+  guiDiscord?: boolean;
+  discordWebhook?: string | null;
+  nguongDiscord?: string;
+  anhTheoLop?: boolean;
+  soAnhMoiLop?: number;
+  phutToiThieuGiuaAnh?: number;
 }) {
   await layCaiDat(); // bảo đảm dòng "default" tồn tại
   return prisma.caiDatThongBao.update({ where: { id: 'default' }, data: input });
@@ -164,9 +171,9 @@ export async function guiDi(input: {
       }
     }
 
-    const duNguong =
-      (THU_TU_MUC_DO[input.mucDo] ?? 0) >= (THU_TU_MUC_DO[caiDat.nguongZalo] ?? 1);
-    if (caiDat.guiZalo && caiDat.zaloThreadId && duNguong) {
+    const mucDoSo = THU_TU_MUC_DO[input.mucDo] ?? 0;
+
+    if (caiDat.guiZalo && caiDat.zaloThreadId && mucDoSo >= (THU_TU_MUC_DO[caiDat.nguongZalo] ?? 1)) {
       try {
         await guiTinNhan({
           threadId: caiDat.zaloThreadId,
@@ -176,6 +183,18 @@ export async function guiDi(input: {
       } catch (e) {
         loi.push(`Zalo: ${e instanceof Error ? e.message : String(e)}`);
       }
+    }
+
+    // Discord có ngưỡng riêng, mặc định thấp hơn Zalo: đây là kênh sổ cái, nhận cả tin thường.
+    if (caiDat.guiDiscord && caiDat.discordWebhook && mucDoSo >= (THU_TU_MUC_DO[caiDat.nguongDiscord] ?? 0)) {
+      const ok = await guiDiscord({
+        webhook: caiDat.discordWebhook,
+        tieuDe: input.tieuDe,
+        noiDung: input.noiDung,
+        mucDo: input.mucDo,
+      });
+      if (ok) daGui = true;
+      else loi.push('Discord: không gửi được.');
     }
   } catch (e) {
     loi.push(e instanceof Error ? e.message : String(e));

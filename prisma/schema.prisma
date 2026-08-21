@@ -732,5 +732,23 @@ model CaiDatThongBao {
   /// Chỉ gửi Zalo khi mức độ >= ngưỡng này: tin | canhBao | loi. Tránh spam nhóm chat.
   nguongZalo String @default("canhBao")
 
+  /// Discord là kênh "sổ cái": nhận mọi thứ, kể cả tin thường và ảnh camera từng lớp. Zalo để dành
+  /// cho việc cần người xử lý ngay — nên hai kênh có ngưỡng riêng.
+  guiDiscord     Boolean @default(false)
+  discordWebhook String?
+
+  /// Ngưỡng riêng cho Discord. Mặc định `tin` = nhận tất cả.
+  nguongDiscord String @default("tin")
+
+  /// Chụp ảnh camera gửi Discord mỗi khi máy in xong một lớp.
+  anhTheoLop Boolean @default(false)
+
+  /// Số ảnh mỗi lần chụp (1-3). Camera A1/P1 chỉ ~0,4 hình/giây nên 3 ảnh mất ~7,5 giây.
+  soAnhMoiLop Int @default(1)
+
+  /// Khoảng cách tối thiểu giữa hai lần gửi ảnh của cùng một máy, tính bằng phút.
+  /// Bản in lớp mỏng có thể xong một lớp mỗi 20 giây — không chặn là ngập kênh.
+  phutToiThieuGiuaAnh Int @default(5)
+
   updatedAt DateTime @updatedAt
 }
