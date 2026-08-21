@@ -93,6 +93,8 @@ export function chanDoanChang(stgCur: number | undefined | null): ChanDoan {
   return chanDoanTheoKhoa(CHANG[Number(stgCur)] ?? 'unknown');
 }
 
+import { moTaHms, moTaLoiBanIn } from './tu-dien-loi';
+
 const hex4 = (n: number) => (n >>> 0).toString(16).toUpperCase().padStart(4, '0');
 
 /** Mức độ nằm ở 16 bit cao của `code`. */
@@ -125,6 +127,8 @@ export function docHms(hms: Array<{ attr?: number; code?: number }> | undefined 
         ma,
         mucDo: MUC_DO_HMS[bac] ?? `bậc ${bac}`,
         nang: bac === 1 || bac === 2,
+        // Đường MQTT chỉ có số; chữ lấy từ kho lỗi tiếng Việt chính thức của Bambu.
+        moTa: moTaHms(ma) ?? undefined,
         wiki: `https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/${ma.toLowerCase()}`,
       };
     });
@@ -166,7 +170,8 @@ export function docHmsTuHa(attrs: Record<string, unknown> | undefined | null): L
       ma,
       mucDo: bac?.nhan ?? 'không rõ',
       nang: bac?.nang ?? false,
-      moTa: String(attrs[`${i}-Error`] ?? '') || undefined,
+      // Ưu tiên tiếng Việt; HA chỉ có tiếng Anh nên chỉ dùng khi từ điển chưa có mã đó.
+      moTa: moTaHms(ma) ?? (String(attrs[`${i}-Error`] ?? '') || undefined),
       wiki: String(attrs[`${i}-Wiki`] ?? '') || `https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/${ma.toLowerCase()}`,
     });
   }
@@ -184,6 +189,10 @@ export function docHmsTuHa(attrs: Record<string, unknown> | undefined | null): L
 export function moTaLoiDeBao(chanDoan: ChanDoan, printError: string | null): string | null {
   const phan: string[] = [];
   if (chanDoan.lyDo) phan.push(chanDoan.lyDo);
-  if (printError) phan.push(`mã lỗi ${printError}`);
+  if (printError) {
+    // Có chữ thì đưa chữ — mã hex trần chẳng nói gì với người đang đứng cạnh máy.
+    const chu = moTaLoiBanIn(printError);
+    phan.push(chu ? `${chu} (${printError})` : `mã lỗi ${printError}`);
+  }
   return phan.length > 0 ? phan.join(' · ') : null;
 }

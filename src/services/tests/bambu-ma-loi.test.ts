@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   chanDoanChang,
@@ -8,6 +8,7 @@ import {
   moTaLoiDeBao,
 } from '../printer-integration/providers/bambu/ma-loi';
 import { gopSau } from '../printer-integration/providers/bambu/mqtt-lan';
+import { datTuDienLoi } from '../printer-integration/providers/bambu/tu-dien-loi';
 
 /**
  * Máy Bambu không gửi chữ, chỉ gửi số. Ghép sai một phép dịch bit là ra mã lỗi vô nghĩa, mà lỗi
@@ -167,5 +168,53 @@ describe('docHmsTuHa', () => {
   it('máy sạch thì trả mảng rỗng', () => {
     expect(docHmsTuHa({ Count: 0 })).toEqual([]);
     expect(docHmsTuHa(null)).toEqual([]);
+  });
+});
+
+describe('từ điển lỗi tiếng Việt', () => {
+  /**
+   * Máy in chỉ đẩy về số. Đưa mã hex trần cho thợ đứng máy thì vô dụng — Bambu có sẵn kho mô tả
+   * tiếng Việt chính thức nên không phải tự dịch. Các ca dưới đây bơm từ điển giả, không gọi mạng.
+   */
+  const KHO = {
+    hms: { '0500040000010044': 'Phần mềm cơ sở của AMS A không khớp với máy in.' },
+    banIn: { '07008011': 'Sợi nhựa tại AMS đã hết. Hãy lắp sợi nhựa mới vào cùng một khe AMS.' },
+  };
+
+  afterEach(() => datTuDienLoi(undefined));
+
+  it('docHms gắn chữ tiếng Việt vào mã', () => {
+    datTuDienLoi(KHO);
+    const [l] = docHms([{ attr: 0x05000400, code: 0x00010044 }]);
+
+    expect(l.ma).toBe('0500_0400_0001_0044');
+    expect(l.moTa).toContain('AMS A');
+  });
+
+  it('tin nhắn thông báo dùng chữ, không phải mã trần', () => {
+    datTuDienLoi(KHO);
+    expect(moTaLoiDeBao(chanDoanChang(35), '0700_8011')).toBe(
+      'tắc đầu phun · Sợi nhựa tại AMS đã hết. Hãy lắp sợi nhựa mới vào cùng một khe AMS. (0700_8011)',
+    );
+  });
+
+  it('mã lạ hoặc chưa tải từ điển thì vẫn hiện mã, không nuốt mất', () => {
+    datTuDienLoi(KHO);
+    expect(moTaLoiDeBao(chanDoanChang(0), '9999_9999')).toBe('mã lỗi 9999_9999');
+
+    datTuDienLoi(undefined);
+    expect(moTaLoiDeBao(chanDoanChang(0), '0700_8011')).toBe('mã lỗi 0700_8011');
+    expect(docHms([{ attr: 0x05000400, code: 0x00010044 }])[0].moTa).toBeUndefined();
+  });
+
+  it('Home Assistant có chữ tiếng Anh thì vẫn ưu tiên tiếng Việt', () => {
+    datTuDienLoi(KHO);
+    const [l] = docHmsTuHa({
+      Count: 1,
+      '1-Code': 'HMS_0500_0400_0001_0044',
+      '1-Error': 'The firmware of AMS A does not match the printer.',
+      '1-Severity': 'fatal',
+    });
+    expect(l.moTa).toContain('Phần mềm cơ sở');
   });
 });
