@@ -8,6 +8,7 @@ import '../../core/widgets/common.dart';
 import '../../data/models/printer.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/label_repository.dart';
+import 'defect_qr_tab.dart';
 
 class QrCommand {
   const QrCommand({
@@ -136,14 +137,17 @@ class QrCommandsScreen extends ConsumerWidget {
     final printers = ref.watch(printersProvider).valueOrNull ?? const [];
 
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('QR lệnh'),
           bottom: const TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
             tabs: [
               Tab(text: 'Lệnh thao tác'),
               Tab(text: 'Slot AMS'),
+              Tab(text: 'Số con lỗi'),
             ],
           ),
         ),
@@ -196,6 +200,7 @@ class QrCommandsScreen extends ConsumerWidget {
               ],
             ),
             _AmsSlotTab(printers: printers),
+            const DefectQrTab(),
           ],
         ),
       ),

@@ -155,60 +155,119 @@ export async function sendToPrinter(tsplCommand: string, devicePath: string = PR
 }
 
 /**
- * Sinh chuỗi lệnh TSPL in 1D Barcode cho Đơn hàng.
- * - Loại bỏ mã QR, sử dụng Barcode 1D (Code 128).
- * - Làm nổi bật Tên miếng (Tên sản phẩm - Tên miếng) thật to.
- * - Hiện STT (ví dụ 1-1).
+ * Bề rộng / chiều cao thật của các font dựng sẵn trong firmware XPrinter (dots).
+ * Sai số ở đây là nguyên nhân của mọi ca "in ra bị tràn mất chữ": tính bằng con
+ * số nhỏ hơn thật thì dòng nào cũng tưởng vừa tem, in ra mới thấy cụt.
+ */
+const FONT_METRICS: Record<string, { w: number; h: number }> = {
+  '1': { w: 8, h: 12 },
+  '2': { w: 12, h: 20 },
+  '3': { w: 16, h: 24 },
+  '4': { w: 24, h: 32 },
+  '5': { w: 32, h: 48 },
+};
+
+/** Chiều ngang tem 40mm tính bằng dot (203 DPI). */
+const LABEL_WIDTH = 320;
+/** Chiều dọc tem 30mm tính bằng dot. */
+const LABEL_HEIGHT = 240;
+
+/**
+ * Cắt chuỗi thành tối đa [maxLines] dòng, mỗi dòng không quá [maxChars] ký tự.
+ * Ưu tiên ngắt ở khoảng trắng / dấu gạch để không cắt giữa từ; từ dài quá thì
+ * cắt cứng. Phần thừa sau dòng cuối bị bỏ — tem không co giãn được.
+ */
+function wrapLabelText(text: string, maxChars: number, maxLines: number): string[] {
+  const lines: string[] = [];
+  let remaining = text.trim();
+
+  while (remaining.length > 0 && lines.length < maxLines) {
+    if (remaining.length <= maxChars) {
+      lines.push(remaining);
+      break;
+    }
+
+    let splitIndex = remaining.lastIndexOf(' ', maxChars);
+    if (splitIndex <= 0) splitIndex = remaining.lastIndexOf('-', maxChars);
+    if (splitIndex <= 0) splitIndex = maxChars;
+
+    lines.push(remaining.substring(0, splitIndex).trim());
+    remaining = remaining.substring(splitIndex).trim();
+    if (remaining.startsWith('-')) remaining = remaining.substring(1).trim();
+  }
+
+  return lines.filter((line) => line.length > 0);
+}
+
+/** Toạ độ X để một dòng chữ nằm giữa tem, không bao giờ âm. */
+function centerX(text: string, font: string, scale = 1): number {
+  const width = text.length * FONT_METRICS[font].w * scale;
+  return Math.max(0, Math.floor((LABEL_WIDTH - width) / 2));
+}
+
+/**
+ * Sinh chuỗi lệnh TSPL in 1D Barcode cho tem miếng in / tem lượt in SLL.
+ *
+ * Bố cục dựng từ dưới lên để **không bao giờ tràn khỏi tem 320×240**: mọi dòng
+ * đều được cắt theo bề rộng font thật rồi căn giữa, và chiều cao mã vạch co lại
+ * đúng bằng chỗ còn trống sau khi đã chừa đủ cho chữ.
+ *
+ * ┌──────────────────────────────┐
+ * │   TEN SAN PHAM (tối đa 2 dòng)│  font "3" — 16×24
+ * │   ▌▌▐ ▌▐▐ ▌▌ ▐▌ ▐▌▌ ▐▌       │  Code 128, cao co theo chỗ trống
+ * │        12345678              │  font "2" — số của chính mã vạch
+ * │   MAY IN 01 PEI 1 - 12 CON   │  font "2" — tối đa 2 dòng
+ * └──────────────────────────────┘
+ *
+ * @param barcode - Nội dung mã vạch (mã 8 số của miếng in hoặc lượt in)
+ * @param labelData - line2 = tên, line3 = mô tả phụ (line1 không in, đã là mã vạch)
  */
 export function buildOrderBarcodeTSPLCommand(barcode: string, labelData: LabelData): string {
   const line2 = sanitizeTSPL(removeDiacritics(labelData.line2)).toUpperCase();
   const line3 = sanitizeTSPL(removeDiacritics(labelData.line3)).toUpperCase();
   const barcodeContent = sanitizeTSPL(removeDiacritics(barcode)).toUpperCase();
-  
-  // Căn lề trái 2mm cho Line 2 (Tên miếng)
-  const line2X = 16;
-  
-  // Do máy in thực tế bị tràn chữ ở ký tự 18-19, ta giới hạn maxChars = 16 để tuyệt đối an toàn
-  const maxChars = 16;
-  const nameLines = [];
-  let remaining = line2;
 
-  while (remaining.length > 0 && nameLines.length < 2) {
-    if (remaining.length <= maxChars) {
-      nameLines.push(remaining);
-      break;
-    }
-    
-    // Tìm khoảng trắng hoặc dấu gạch ngang cuối cùng trong giới hạn maxChars
-    let splitIndex = remaining.lastIndexOf(' ', maxChars);
-    if (splitIndex === -1) {
-      splitIndex = remaining.lastIndexOf('-', maxChars);
-    }
-    
-    // Nếu là từ liền mạch quá dài, cắt cứng luôn tại maxChars
-    if (splitIndex === -1 || splitIndex === 0) {
-      splitIndex = maxChars;
-    }
+  const MARGIN = 8;
+  const nameFont = '3';
+  const subFont = '2';
 
-    nameLines.push(remaining.substring(0, splitIndex).trim());
-    // Lấy phần còn lại
-    remaining = remaining.substring(splitIndex).trim();
-    // Bỏ dấu gạch ngang ở đầu dòng mới nếu bị cắt ngang
-    if (remaining.startsWith('-')) remaining = remaining.substring(1).trim();
-  }
+  // ── Tên (line2): tối đa 2 dòng font "3" ──
+  const nameMaxChars = Math.floor((LABEL_WIDTH - MARGIN * 2) / FONT_METRICS[nameFont].w);
+  const nameLines = wrapLabelText(line2, nameMaxChars, 2);
 
-  const printLine1 = nameLines[0] || '';
-  const printLine2 = nameLines[1] || ''; // Chỉ hỗ trợ tối đa 2 dòng
+  // ── Mô tả phụ (line3): tối đa 2 dòng font "2" ──
+  const subMaxChars = Math.floor((LABEL_WIDTH - MARGIN * 2) / FONT_METRICS[subFont].w);
+  const subLines = wrapLabelText(line3, subMaxChars, 2);
 
-  // Tính toán căn giữa cho Line 3 (STT)
-  const line3CharWidth = 12; // Font "3" scale 1,1
-  const line3Length = line3.length * line3CharWidth;
-  const line3X = Math.max(0, Math.floor((320 - line3Length) / 2));
+  // ── Chiều cao từng khối, tính từ trên xuống ──
+  const nameHeight = nameLines.length === 0
+    ? 0
+    : nameLines.length * FONT_METRICS[nameFont].h + (nameLines.length - 1) * 4;
+  const nameY = nameLines.length >= 2 ? 6 : 10;
+  const barcodeY = nameLines.length === 0 ? 20 : nameY + nameHeight + 8;
 
-  // Mã vạch Code 128
-  const barcodeX = 40; 
-  // Nếu có 2 dòng text thì đẩy barcode xuống một chút
-  const barcodeY = printLine2 ? 80 : 70;
+  // Khối chữ dưới mã vạch: số của mã vạch + mô tả phụ.
+  const subHeight = subLines.length === 0
+    ? 0
+    : subLines.length * FONT_METRICS[subFont].h + (subLines.length - 1) * 3;
+  const bottomStack = 6 + FONT_METRICS[subFont].h + (subHeight > 0 ? 6 + subHeight : 0) + MARGIN;
+
+  // Mã vạch lấy hết chỗ còn lại, nhưng không thấp quá mức máy quét đọc nổi.
+  const barcodeHeight = Math.max(
+    40,
+    Math.min(88, LABEL_HEIGHT - barcodeY - bottomStack),
+  );
+
+  // ── Bề rộng mã vạch Code 128 ──
+  // Mỗi ký tự 11 module, cộng start (11) + check (11) + stop (13). Rộng quá tem thì
+  // hạ narrow xuống 1 chứ không để máy in cắt cụt phần đuôi — mã cụt là mã không quét được.
+  const modules = 11 * (barcodeContent.length + 2) + 13;
+  const narrow = modules * 2 <= LABEL_WIDTH - MARGIN * 2 ? 2 : 1;
+  const barcodeWidth = modules * narrow;
+  const barcodeX = Math.max(0, Math.floor((LABEL_WIDTH - barcodeWidth) / 2));
+
+  const digitsY = barcodeY + barcodeHeight + 6;
+  const subY = digitsY + FONT_METRICS[subFont].h + 6;
 
   const commands = [
     'SIZE 40 mm, 30 mm',
@@ -218,21 +277,23 @@ export function buildOrderBarcodeTSPLCommand(barcode: string, labelData: LabelDa
     'OFFSET 0 mm',
     'CLS',
 
-    // In tên miếng (hỗ trợ xuống dòng) - dùng Font "3" scale 1,1 như cũ
-    ...(printLine2 
-      ? [
-          `TEXT ${line2X},10,"3",0,1,1,"${printLine1}"`,
-          `TEXT ${line2X},40,"3",0,1,1,"${printLine2}"`
-        ]
-      : [
-          `TEXT ${line2X},25,"3",0,1,1,"${printLine1}"`
-        ]),
+    // ── Tên, căn giữa ──
+    ...nameLines.map(
+      (text, index) =>
+        `TEXT ${centerX(text, nameFont)},${nameY + index * (FONT_METRICS[nameFont].h + 4)},"${nameFont}",0,1,1,"${text}"`,
+    ),
 
-    // Barcode 1D ở giữa, human_readable = 0 (ẩn text), chiều cao 80, narrow=2, wide=4
-    `BARCODE ${barcodeX},${barcodeY},"128M",80,0,0,2,4,"${barcodeContent}"`,
+    // ── Mã vạch Code 128, human_readable = 0 (số tự vẽ ở dưới cho chắc chỗ) ──
+    `BARCODE ${barcodeX},${barcodeY},"128M",${barcodeHeight},0,0,${narrow},${narrow * 2},"${barcodeContent}"`,
 
-    // STT ở dưới
-    `TEXT ${line3X},180,"3",0,1,1,"${line3}"`,
+    // ── Số của chính mã vạch, chữ nhỏ ngay dưới vạch ──
+    `TEXT ${centerX(barcodeContent, subFont)},${digitsY},"${subFont}",0,1,1,"${barcodeContent}"`,
+
+    // ── Mô tả phụ, căn giữa ──
+    ...subLines.map(
+      (text, index) =>
+        `TEXT ${centerX(text, subFont)},${subY + index * (FONT_METRICS[subFont].h + 3)},"${subFont}",0,1,1,"${text}"`,
+    ),
 
     'PRINT 1,1',
   ];

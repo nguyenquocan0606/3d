@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/config/app_settings.dart';
 import '../../core/format/formatters.dart';
 import '../../core/scan/code_normalizer.dart';
 import '../../core/scan/pda_scan.dart';
+import '../../core/scan/scan_input_mode.dart';
 import '../../core/scan/scan_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
@@ -78,22 +80,44 @@ Future<int?> askDefectQuantity(BuildContext context, BulkRun run) {
   );
 }
 
-class _DefectSheet extends StatefulWidget {
+class _DefectSheet extends ConsumerStatefulWidget {
   const _DefectSheet({required this.run});
 
   final BulkRun run;
 
   @override
-  State<_DefectSheet> createState() => _DefectSheetState();
+  ConsumerState<_DefectSheet> createState() => _DefectSheetState();
 }
 
-class _DefectSheetState extends State<_DefectSheet> {
+class _DefectSheetState extends ConsumerState<_DefectSheet> {
   final _controller = TextEditingController();
+
+  /// Máy PDA thì **không** bật sẵn con trỏ vào ô số: con trỏ nằm trong ô nhập là mã quét chạy
+  /// thẳng vào ô đó thay vì về [PdaScanScope], nên tờ QR số coi như vô dụng. Điện thoại thì
+  /// ngược lại — bàn phím bật sẵn mới nhanh.
+  late final bool _pda =
+      ref.read(appSettingsProvider).scanInputMode == ScanInputMode.pda;
 
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  /// Quét QR số ngay trên bảng này = gõ số rồi bấm nút, chỉ nhanh hơn.
+  ///
+  /// Bàn phím số là chỗ chậm nhất của cả luồng chốt mâm: tay thợ dính nhựa, mắt còn đang đếm
+  /// miếng lỗi trên mâm. Tờ QR số dán cạnh máy in giải quyết xong.
+  Future<String?> _quetQrSoLoi(String code) async {
+    final soLoi = ScanCommands.defectQuantityOf(code);
+    if (soLoi == null) {
+      throw ScanFailure('"${code.trim()}" không phải QR số con lỗi.');
+    }
+    if (soLoi > widget.run.quantity) {
+      throw ScanFailure('Mâm này chỉ có ${widget.run.quantity} con.');
+    }
+    if (mounted) Navigator.pop(context, soLoi);
+    return null;
   }
 
   void _submit() {
@@ -113,6 +137,13 @@ class _DefectSheetState extends State<_DefectSheet> {
   Widget build(BuildContext context) {
     final run = widget.run;
 
+    return PdaScanScope(
+      onCode: _quetQrSoLoi,
+      child: _buildSheet(context, run),
+    );
+  }
+
+  Widget _buildSheet(BuildContext context, BulkRun run) {
     return Padding(
       padding: EdgeInsets.fromLTRB(
         16,
@@ -149,7 +180,7 @@ class _DefectSheetState extends State<_DefectSheet> {
               Expanded(
                 child: TextField(
                   controller: _controller,
-                  autofocus: true,
+                  autofocus: !_pda,
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   decoration: const InputDecoration(
@@ -172,6 +203,7 @@ class _DefectSheetState extends State<_DefectSheet> {
           ),
           const SizedBox(height: 12),
           const Text(
+            'Quét QR số (tờ 1–30 ở màn "QR lệnh") thay cho gõ số cũng được.\n'
             'Số lỗi bị trừ khỏi hàng tốt của đơn. In bù bằng nút "In miếng lỗi" ở màn '
             'chi tiết đơn.',
             style: TextStyle(fontSize: 12.5, color: AppColors.muted, height: 1.4),

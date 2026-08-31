@@ -13,6 +13,7 @@ import '../../data/repositories/label_repository.dart';
 import '../production/pei_sheet_detail_screen.dart';
 import '../scanner/scanner_screen.dart';
 import '../spools/color_detail_screen.dart';
+import 'custom_label.dart';
 import 'label_payload.dart';
 
 enum LabelSource {
@@ -22,7 +23,7 @@ enum LabelSource {
   printer('Máy in'),
   printerSlot('Slot AMS của máy in'),
   peiSheet('Mâm in PEI'),
-  custom('Tự nhập');
+  custom('In tự do');
 
   const LabelSource(this.label);
   final String label;
@@ -50,6 +51,11 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
   String? _selectedId;
   int _slot = 1;
   bool _busy = false;
+
+  // ── Riêng cho "In tự do" ──
+  LabelTemplate _template = LabelTemplate.textOnly;
+  LabelFontSize _fontSize = LabelFontSize.lg;
+  int _copies = 1;
 
   final _reprintController = TextEditingController();
   final _qrController = TextEditingController();
@@ -157,7 +163,44 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
     }
   }
 
+  /// Nội dung tem "in tự do" đang gõ dở — dùng chung cho xem trước và lúc in.
+  CustomLabelSpec get _customSpec => CustomLabelSpec(
+        template: _template,
+        line1: _line1Controller.text,
+        line2: _line2Controller.text,
+        line3: _line3Controller.text,
+        codeContent: _qrController.text,
+        fontSize: _fontSize,
+        copies: _copies,
+      );
+
+  /// In tem tự do: app tự vẽ tem ra ảnh rồi gửi ảnh, nên in được cả chữ có dấu.
+  Future<void> _printCustom() async {
+    final spec = _customSpec;
+    if (spec.isEmpty) {
+      showToast(context, 'Nhập ít nhất 1 dòng nội dung.', isError: true);
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      final bitmap = await renderCustomLabelBase64(spec);
+      await ref.read(labelRepositoryProvider).printCustomLabel(
+            bitmapBase64: bitmap,
+            copies: spec.copies,
+            label: spec.summary,
+          );
+      if (mounted) showToast(context, 'Đã gửi ${spec.copies} tem tới máy in của xưởng.');
+    } catch (error) {
+      if (mounted) showToast(context, '$error', isError: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _print() async {
+    if (_source == LabelSource.custom) return _printCustom();
+
     final payload = _buildPayload();
     if (payload == null) {
       showToast(context, 'Chưa chọn/nhập đủ nội dung tem.', isError: true);
@@ -262,9 +305,12 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
             style: TextStyle(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Dùng khi in tem lần đầu cho thứ chưa có tem dán.',
-            style: TextStyle(fontSize: 12.5, color: AppColors.muted),
+          Text(
+            _source == LabelSource.custom
+                ? 'Tem tự do: gõ gì in nấy, chọn bố cục và cỡ chữ — kể cả tem chỉ có mấy chữ '
+                    'thật to, không mã nào cả.'
+                : 'Dùng khi in tem lần đầu cho thứ chưa có tem dán.',
+            style: const TextStyle(fontSize: 12.5, color: AppColors.muted, height: 1.35),
           ),
           const SizedBox(height: 10),
           Wrap(
@@ -301,38 +347,19 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
               ],
             ),
           ],
-          if (_source == LabelSource.custom) ...[
-            TextField(
-              controller: _qrController,
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(labelText: 'Nội dung QR'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _line1Controller,
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(labelText: 'Dòng 1 (mã)'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _line2Controller,
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(labelText: 'Dòng 2 (loại)'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _line3Controller,
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(labelText: 'Dòng 3 (tên)'),
-            ),
-          ],
+          if (_source == LabelSource.custom) ..._customFields(),
           const SizedBox(height: 20),
           const Text('Xem trước', style: TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 10),
-          _LabelPreview(payload: payload),
+          if (_source == LabelSource.custom)
+            CustomLabelPreview(spec: _customSpec)
+          else
+            _LabelPreview(payload: payload),
           const SizedBox(height: 20),
           FilledButton.icon(
-            onPressed: _busy || payload == null ? null : _print,
+            onPressed: _busy || (_source == LabelSource.custom ? _customSpec.isEmpty : payload == null)
+                ? null
+                : _print,
             icon: _busy
                 ? const SizedBox(
                     width: 18,
@@ -340,11 +367,143 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.print_rounded),
-            label: Text(_busy ? 'Đang gửi...' : 'In tem'),
+            label: Text(
+              _busy
+                  ? 'Đang gửi...'
+                  : _source == LabelSource.custom && _copies > 1
+                      ? 'In $_copies tem'
+                      : 'In tem',
+            ),
           ),
         ],
       ),
     );
+  }
+
+  /// Phần "In tự do": chọn bố cục, cỡ chữ, số bản rồi gõ nội dung.
+  ///
+  /// Đây là thứ bản web có mà app thiếu bấy lâu — nhất là mẫu **Chỉ chữ**: dán thùng hàng, ghi
+  /// tên kệ, đánh dấu lô nhựa... toàn những việc chẳng cần mã nào, chỉ cần mấy chữ thật to.
+  List<Widget> _customFields() {
+    final coMa = _template != LabelTemplate.textOnly;
+
+    return [
+      const Text('Bố cục tem', style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final template in LabelTemplate.values)
+            ChoiceChip(
+              label: Text(template.label),
+              selected: _template == template,
+              onSelected: (_) => setState(() => _template = template),
+            ),
+        ],
+      ),
+      const SizedBox(height: 6),
+      Text(
+        _template.desc,
+        style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
+      ),
+
+      const SizedBox(height: 16),
+      const Text('Cỡ chữ', style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final size in LabelFontSize.values)
+            ChoiceChip(
+              label: Text('${size.label} · ${size.desc}'),
+              selected: _fontSize == size,
+              onSelected: (_) => setState(() => _fontSize = size),
+            ),
+        ],
+      ),
+      if (coMa && _fontSize.px > 40) ...[
+        const SizedBox(height: 6),
+        const Text(
+          'Mẫu có mã QR/mã vạch bị chặn cỡ chữ để chữ không đè lên mã. '
+          'Muốn chữ to hết cỡ thì chọn bố cục "Chỉ chữ".',
+          style: TextStyle(fontSize: 12.5, color: AppColors.warning, height: 1.35),
+        ),
+      ],
+
+      const SizedBox(height: 16),
+      Row(
+        children: [
+          const Text('Số bản in', style: TextStyle(fontWeight: FontWeight.w700)),
+          const Spacer(),
+          IconButton.outlined(
+            onPressed: _copies > 1 ? () => setState(() => _copies--) : null,
+            icon: const Icon(Icons.remove_rounded, size: 18),
+          ),
+          SizedBox(
+            width: 44,
+            child: Text(
+              '$_copies',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+            ),
+          ),
+          IconButton.outlined(
+            onPressed: _copies < 20 ? () => setState(() => _copies++) : null,
+            icon: const Icon(Icons.add_rounded, size: 18),
+          ),
+        ],
+      ),
+
+      const SizedBox(height: 16),
+      if (coMa) ...[
+        TextField(
+          controller: _qrController,
+          onChanged: (_) => setState(() {}),
+          decoration: InputDecoration(
+            labelText: _template == LabelTemplate.barcodeText
+                ? 'Nội dung mã vạch'
+                : 'Nội dung QR',
+            helperText: 'Bỏ trống thì lấy dòng 1',
+          ),
+        ),
+        const SizedBox(height: 10),
+      ],
+      TextField(
+        controller: _line1Controller,
+        onChanged: (_) => setState(() {}),
+        decoration: const InputDecoration(labelText: 'Dòng 1'),
+      ),
+      const SizedBox(height: 10),
+      TextField(
+        controller: _line2Controller,
+        onChanged: (_) => setState(() {}),
+        decoration: const InputDecoration(labelText: 'Dòng 2'),
+      ),
+      const SizedBox(height: 10),
+      TextField(
+        controller: _line3Controller,
+        onChanged: (_) => setState(() {}),
+        decoration: const InputDecoration(labelText: 'Dòng 3'),
+      ),
+      const SizedBox(height: 12),
+      const SectionCard(
+        child: Row(
+          children: [
+            Icon(Icons.translate_rounded, color: AppColors.success, size: 20),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Tem tự do in được tiếng Việt CÓ DẤU, và bản xem trước dưới đây đúng bằng bản '
+                'in ra — app vẽ sẵn cả tem rồi gửi ảnh cho máy in.',
+                style: TextStyle(fontSize: 12.5, color: AppColors.muted, height: 1.4),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ];
   }
 
   /// Ô quét/nhập mã để in lại — việc hay làm nhất nên nằm ngay đầu màn.
@@ -491,6 +650,54 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
       ),
     );
   }
+}
+
+/// Xem trước tem tự do — **vẽ bằng đúng hàm dùng lúc in**, nên thấy sao in vậy.
+class CustomLabelPreview extends StatelessWidget {
+  const CustomLabelPreview({super.key, required this.spec});
+
+  final CustomLabelSpec spec;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        children: [
+          Container(
+            width: 320,
+            height: 240,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.border),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: CustomPaint(
+              painter: _CustomLabelPainter(spec),
+              size: const Size(kLabelWidth * 1.0, kLabelHeight * 1.0),
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            '40 × 30 mm · 320 × 240 dot (203 DPI)',
+            style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CustomLabelPainter extends CustomPainter {
+  const _CustomLabelPainter(this.spec);
+
+  final CustomLabelSpec spec;
+
+  @override
+  void paint(Canvas canvas, Size size) => paintCustomLabel(canvas, spec);
+
+  @override
+  bool shouldRepaint(_CustomLabelPainter old) => true;
 }
 
 /// Mô phỏng bố cục tem 40×30mm: QR bên trái, vạch ngăn, 2 dòng chữ xoay bên phải.

@@ -91,6 +91,7 @@ class ScanFailure implements Exception {
 /// | Barcode 8 số | Bảng đổi trạng thái miếng in — hoặc quẹt lượt in SLL |
 /// | Mã hàng hóa `SP-` | Chi tiết hàng hóa + nhập/xuất kho |
 /// | QR lệnh `CMD-` | Chạy lệnh (chỉ `CMD-INV-RESET` dùng được ngoài màn của nó) |
+/// | QR số `CMD-LOI-n` | Số con lỗi khi chốt mâm SLL — chỉ có nghĩa khi bảng lượt in đang mở |
 ///
 /// **Quét là vào thẳng việc, không hỏi lại.** Trước đây mọi mã đều dừng ở một
 /// bảng "đây là mã gì, bạn muốn làm gì" — nhưng gần như loại nào cũng chỉ có đúng
@@ -256,6 +257,12 @@ class ScanRouter {
     if (command == ScanCommands.inventoryReset) {
       await _ref.read(inventorySessionProvider.notifier).reset();
       return 'Đã bắt đầu phiên kiểm kho mới.';
+    }
+    final soLoi = ScanCommands.defectQuantityOf(command);
+    if (soLoi != null) {
+      throw ScanFailure(
+        'QR số $soLoi chỉ dùng lúc chốt mâm in SLL — quét mã lượt in đang in trước đã.',
+      );
     }
     throw ScanFailure(switch (command) {
       ScanCommands.inventoryToggleAll => 'Lệnh này chỉ dùng trong màn Kiểm kho.',

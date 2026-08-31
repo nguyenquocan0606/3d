@@ -104,6 +104,12 @@ void main() {
       expect(result.id, ScanCommands.inventoryReset);
     });
 
+    test('QR số con lỗi vẫn là QR lệnh', () {
+      final result = normalizer.classify('cmd-loi-7');
+      expect(result.kind, ScanKind.command);
+      expect(ScanCommands.defectQuantityOf(result.id!), 7);
+    });
+
     test('mã lạ và chuỗi rỗng', () {
       expect(normalizer.classify('KHONG-BIET-LA-GI').kind, ScanKind.unknown);
       expect(normalizer.classify('   ').kind, ScanKind.unknown);
@@ -117,6 +123,33 @@ void main() {
         orderCodes: {'PLA-WHT-01'},
       );
       expect(conflict.classify('PLA-WHT-01').kind, ScanKind.spool);
+    });
+  });
+
+  group('ScanCommands.defectQuantityOf', () {
+    test('đọc số con lỗi từ QR số', () {
+      expect(ScanCommands.defectQuantityOf('CMD-LOI-1'), 1);
+      expect(ScanCommands.defectQuantityOf('CMD-LOI-30'), 30);
+      // Tờ QR in ra chỉ có 1..30, nhưng mã gõ tay lớn hơn vẫn đọc được — chặn
+      // theo số con trên mâm là việc của màn chốt lượt, không phải của bộ đọc mã.
+      expect(ScanCommands.defectQuantityOf('CMD-LOI-99'), 99);
+    });
+
+    test('chấp nhận chữ thường và khoảng trắng thừa', () {
+      expect(ScanCommands.defectQuantityOf('  cmd-loi-12  '), 12);
+    });
+
+    test('trả null với mã không phải QR số', () {
+      expect(ScanCommands.defectQuantityOf('CMD-INV-RESET'), isNull);
+      expect(ScanCommands.defectQuantityOf('CMD-LOI-'), isNull);
+      expect(ScanCommands.defectQuantityOf('CMD-LOI-BA'), isNull);
+      expect(ScanCommands.defectQuantityOf('CMD-LOI--3'), isNull);
+      expect(ScanCommands.defectQuantityOf('12345678'), isNull);
+    });
+
+    test('sinh đúng mã cho tờ QR in ra', () {
+      expect(ScanCommands.defect(5), 'CMD-LOI-5');
+      expect(ScanCommands.defectQuantityOf(ScanCommands.defect(30)), 30);
     });
   });
 }

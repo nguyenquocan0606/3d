@@ -45,6 +45,15 @@ dependencies:
   # Hiển thị mã QR của hàng hóa / cuộn nhựa
   qr_flutter: ^4.1.0
 
+  # Sinh file PDF (tờ QR số lỗi 1..30) và mở hộp thoại in / lưu / chia sẻ của máy.
+  # Tờ này in bằng máy in giấy thường, không phải máy tem TSPL của xưởng.
+  pdf: ^3.11.1
+  printing: ^5.13.4
+
+  # Sinh mã vạch Code 128 để vẽ lên tem "in tự do" (bản web tự encode bằng tay
+  # trong print-label-tab.tsx; app dùng thư viện cho khỏi chép lại bảng ký tự).
+  barcode: ^2.2.9
+
   # Trạm cân MQTT over WebSocket
   mqtt_client: ^10.6.0
 

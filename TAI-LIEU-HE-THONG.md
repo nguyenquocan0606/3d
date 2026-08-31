@@ -366,9 +366,12 @@ Chia **vòng tròn** cho các máy chọn lúc tạo đơn nên máy nào cũng 
 | `CMD-INV-TOGGLE-ALL` | Tab Kiểm kho | Bật/tắt hiển thị mọi trạng thái cuộn |
 | `CMD-WEIGHT-TAB` | Modal cân | Chuyển ô nhập đang active (total → remaining → empty) |
 | `CMD-WEIGHT-DONE` | Modal cân | Lưu & đóng |
+| `CMD-LOI-1..30` | Bảng lượt in SLL (app) | Chốt "in xong" kèm đúng số con lỗi ghi trên mã |
 | `PRT-xx-L1..4` | Toàn cục | Bật chế độ "quét cuộn để gán vào slot AMS" |
 
 > Component `qr-commands-modal.tsx` chịu trách nhiệm hiển thị & in các QR lệnh này.
+> Riêng `CMD-LOI-n` chỉ có ở app (màn **QR lệnh → tab Số con lỗi**), in ra thành **một tờ A4
+> 30 mã** để dán cạnh máy in — xem `mobile/lib/features/labels/defect_qr_tab.dart`.
 
 ### 4.3. Quy tắc luồng quét toàn cục (`src/app/page.tsx`)
 

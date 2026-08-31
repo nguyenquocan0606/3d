@@ -106,9 +106,10 @@ màn hình chính nào qua nút **☰** trên thanh tiêu đề, khỏi phải q
 | Mã đơn hàng | Chi tiết đơn + tiến độ tem |
 | `SLL-…` đơn số lượng lớn | Chi tiết đơn + các lượt PEI |
 | Barcode 8 số — miếng in | Bảng đổi trạng thái miếng in |
-| Barcode 8 số — lượt in SLL | Quẹt luôn: chờ in → đòi quét tiếp tem máy in; đang in → hỏi số con lỗi rồi chốt |
+| Barcode 8 số — lượt in SLL | Bảng chi tiết lượt; quét tiếp ngay trên bảng: tem máy in / QR số lỗi / mã lượt khác |
 | `SP-…` hàng hóa | Chi tiết + nhập/xuất kho |
 | `CMD-…` | QR lệnh (reset kiểm kho…) |
+| `CMD-LOI-n` | Số con lỗi khi chốt mâm SLL — chỉ có nghĩa khi bảng lượt in đang mở |
 
 **Quét là vào thẳng việc, không có bảng hỏi lại ở giữa.** Người cầm máy quét là
 người đang làm việc chứ không phải đang tra cứu, nên mỗi loại tem đi đúng một
@@ -117,6 +118,20 @@ SLL, Cân, In tem) thì mã được chính màn đó xử lý, không rơi xu�
 chung này.
 
 Mã được chuẩn hóa bằng cách bỏ `-` và viết hoa, nên `PLAWHT01` = `PLA-WHT-01`.
+
+#### Quẹt lượt in SLL — quét tiếp ngay trên bảng đang mở
+
+Quét mã lượt là mở bảng chi tiết. Bảng đó **vẫn nghe máy quét**, nên cả lượt chốt mâm không
+phải chạm màn hình lần nào:
+
+| Quét tiếp gì | Lượt đang chờ in | Lượt đang in |
+|---|---|---|
+| Tem máy in | Bắt đầu in trên đúng máy vừa quét | Chốt in xong, **không con nào lỗi** |
+| QR số `CMD-LOI-n` | báo lỗi (chưa in thì chưa có gì để chốt) | Chốt in xong, **n con lỗi** |
+| Mã lượt in khác | bảng nhảy sang lượt đó | bảng nhảy sang lượt đó |
+
+Tờ QR số 1–30 in ở **QR lệnh → tab Số con lỗi** (xuất PDF A4, 30 mã một trang) rồi dán cạnh
+máy in. Muốn gõ số thì nút "Chốt in xong" vẫn hỏi như cũ.
 
 Riêng tem màu cần xử lý thêm: máy in nhiệt không in được Unicode nên QR in ra đã
 **bị bỏ dấu** (`CLR-Đỏ` → `CLR-DO`), trong khi DB vẫn lưu "Đỏ". App port lại hàm
@@ -135,7 +150,7 @@ dính tới mã, QR và quét đều có trên app.
 
 | Nhóm | Màn hình | Ghi chú |
 |---|---|---|
-| Quét & mã | Quét toàn cục, **QR lệnh** (bảng `CMD-*` + QR slot AMS), In tem nhãn (**quét tem cũ → in lại ngay**) | QR xem to trên màn hình hoặc in ra dán |
+| Quét & mã | Quét toàn cục, **QR lệnh** (bảng `CMD-*` + QR slot AMS + **tờ QR số con lỗi 1–30, xuất PDF**), In tem nhãn (**quét tem cũ → in lại ngay**, **in tự do 4 bố cục có dấu tiếng Việt**) | QR xem to trên màn hình hoặc in ra dán |
 | Tổng quan | 5 chỉ số, cuộn sắp hết, phân bổ vật liệu/màu | widget số cân realtime |
 | Cuộn nhựa | Danh sách (lọc/sắp xếp), chi tiết, **cân**, gán kho/máy in, xóa, in tem, QR | |
 | **Thêm cuộn nhựa** | Tạo hàng loạt (tự tăng số mã), chọn loại nhựa có sẵn hoặc nhập mới, tự in tem | ngoại lệ tạo mới duy nhất |

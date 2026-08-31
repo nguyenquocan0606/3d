@@ -51,6 +51,28 @@ class LabelRepository {
         },
       );
 
+  /// In tem "tự do" — app tự vẽ cả tem thành ảnh đen trắng rồi gửi ảnh.
+  ///
+  /// Đây là đường duy nhất in được **chữ tiếng Việt có dấu**: lệnh TSPL dạng TEXT chỉ dùng được
+  /// font dựng sẵn trong máy in, mà font đó không có bảng mã tiếng Việt. Bản web (tab In Tem)
+  /// gửi đúng endpoint này với đúng định dạng bitmap.
+  ///
+  /// [bitmapBase64] là 9600 byte (320×240 dot, 1 bit/dot) đã mã hóa base64.
+  Future<void> printCustomLabel({
+    required String bitmapBase64,
+    required int copies,
+    required String label,
+  }) =>
+      _api.post<void>(
+        '/api/print-jobs/custom',
+        (_) {},
+        body: {
+          'bitmapBase64': bitmapBase64,
+          'copies': copies,
+          'label': label,
+        },
+      );
+
   /// In hàng loạt tem barcode Code 128 cho miếng in của đơn hàng.
   Future<void> printOrderBarcodes(
     List<({String barcode, String line1, String line2, String line3})> jobs,

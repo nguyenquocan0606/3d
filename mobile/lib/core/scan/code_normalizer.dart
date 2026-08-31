@@ -49,6 +49,29 @@ class ScanCommands {
   static const inventoryToggleAll = 'CMD-INV-TOGGLE-ALL';
   static const weightTab = 'CMD-WEIGHT-TAB';
   static const weightDone = 'CMD-WEIGHT-DONE';
+
+  /// Tiền tố QR **số con lỗi** — quét thay cho gõ số lúc chốt lượt in SLL.
+  ///
+  /// Thợ đứng cạnh mâm, tay dính nhựa, cầm súng quét chứ không cầm điện thoại:
+  /// bàn phím số là chỗ chậm nhất của cả luồng. Một tờ QR số dán cạnh máy giải
+  /// quyết xong — quét mã lượt rồi quét số là mâm chốt luôn.
+  static const defectPrefix = 'CMD-LOI-';
+
+  /// Số lớn nhất có trên tờ QR in ra (xem màn "QR lệnh" → tab "QR số lỗi").
+  /// Mâm nhiều hơn chừng này con lỗi là chuyện hiếm, cứ gõ tay.
+  static const maxDefectNumber = 30;
+
+  /// Mã QR của số con lỗi [quantity].
+  static String defect(int quantity) => '$defectPrefix$quantity';
+
+  /// Số con lỗi mà QR này mang, null nếu không phải QR số.
+  static int? defectQuantityOf(String command) {
+    final upper = command.trim().toUpperCase();
+    if (!upper.startsWith(defectPrefix)) return null;
+    final quantity = int.tryParse(upper.substring(defectPrefix.length));
+    if (quantity == null || quantity < 0) return null;
+    return quantity;
+  }
 }
 
 /// Bỏ dấu tiếng Việt — port `removeDiacritics()` của `src/utils/tspl-printer.ts`.

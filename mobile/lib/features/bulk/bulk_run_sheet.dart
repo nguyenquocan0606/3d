@@ -166,11 +166,11 @@ class _BulkRunSheetState extends ConsumerState<_BulkRunSheet> {
     final don = _timDon(orders, _run.orderId);
     final mau = colorForBulkStatus(_run.status);
 
-    // Máy PDA quét bằng phím cứng chứ không mở camera. Bảng đang mở mà thợ bóp cò quét tem máy in
-    // thì bắt đầu lượt luôn — giữ đúng tốc độ của luồng cũ, chỉ thêm phần thông tin ở trên.
+    // Máy PDA quét bằng phím cứng chứ không mở camera. Bảng đang mở mà thợ bóp cò là làm việc luôn,
+    // không phải chạm màn hình lần nào — xem [_quetMa] để biết mã nào làm gì.
     return PdaScanScope(
-      enabled: !_busy && _run.status == BulkStatus.pending,
-      onCode: _quetTuPda,
+      enabled: !_busy,
+      onCode: _quetMa,
       child: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -279,15 +279,80 @@ class _BulkRunSheetState extends ConsumerState<_BulkRunSheet> {
     );
   }
 
-  /// Tem máy in quét từ phím cứng PDA: bắt đầu lượt ngay, khỏi mở camera.
-  Future<String?> _quetTuPda(String code) async {
+  /// Mã quét được khi bảng đang mở — cả súng PDA lẫn ô nhập tay đều đi qua đây.
+  ///
+  /// | Quét gì | Lượt đang chờ in | Lượt đang in |
+  /// |---|---|---|
+  /// | Tem máy in | Bắt đầu in trên đúng máy đó | Chốt in xong, **không lỗi** |
+  /// | QR số N | (chưa in thì chưa có gì để chốt) | Chốt in xong, **N con lỗi** |
+  /// | Mã lượt in khác | Bảng nhảy sang lượt đó | Bảng nhảy sang lượt đó |
+  ///
+  /// Đổi lượt ngay trong bảng chứ không bắt đóng rồi quét lại: thợ ôm cả chồng mâm đi chốt một
+  /// lượt, mỗi lần phải thoát ra là một lần mất nhịp. Quét mã mâm kế tiếp là bảng đổi theo tay.
+  Future<String?> _quetMa(String code) async {
     final scanned = ref.read(codeNormalizerProvider).classify(code);
-    if (scanned.kind != ScanKind.printer || scanned.id == null) {
-      throw ScanFailure('"$code" không phải tem máy in. Lượt vẫn đang chờ in.');
+
+    // Tem máy in — nghĩa của nó đổi theo trạng thái lượt (xem bảng trên).
+    if (scanned.kind == ScanKind.printer && scanned.id != null) {
+      return _quetTemMayIn(scanned.id!);
     }
-    final tin = await startBulkRun(ref, _run, scanned.id!);
+
+    // QR số con lỗi.
+    final soLoi = ScanCommands.defectQuantityOf(scanned.id ?? scanned.raw);
+    if (scanned.kind == ScanKind.command && soLoi != null) {
+      return _quetQrSoLoi(soLoi);
+    }
+
+    // Mã lượt in khác: đổi bảng sang lượt vừa quét.
+    final luot = await findBulkRun(ref, code.trim());
+    if (luot != null) {
+      if (luot.id == _run.id) return 'Vẫn đang ở lượt ${_run.id}.';
+      if (!mounted) return null;
+      setState(() => _run = luot);
+      return 'Chuyển sang lượt ${luot.id} · ${luot.printerName} PEI ${luot.peiIndex} '
+          '(${luot.status.label}).';
+    }
+
+    throw ScanFailure(
+      '"${code.trim()}" không phải tem máy in, QR số lỗi hay mã lượt in.',
+    );
+  }
+
+  /// Tem máy in: bắt đầu lượt đang chờ, hoặc chốt xong lượt đang in mà không có con lỗi nào.
+  Future<String?> _quetTemMayIn(String printerId) async {
+    switch (_run.status) {
+      case BulkStatus.pending:
+        final tin = await startBulkRun(ref, _run, printerId);
+        if (mounted) Navigator.pop(context, tin);
+        return null; // màn quét ngoài sẽ hiện thông báo, đừng toast hai lần
+
+      case BulkStatus.printing:
+        final tin = await finishBulkRun(ref, _run);
+        if (mounted) Navigator.pop(context, tin);
+        return null;
+
+      case BulkStatus.completed:
+        throw ScanFailure(
+          'Lượt ${_run.id} đã chốt in xong rồi. Quét mã lượt khác để làm tiếp.',
+        );
+    }
+  }
+
+  /// QR số: chốt lượt đang in kèm đúng số con lỗi ghi trên tờ QR.
+  Future<String?> _quetQrSoLoi(int soLoi) async {
+    if (_run.status != BulkStatus.printing) {
+      throw ScanFailure(
+        _run.status == BulkStatus.pending
+            ? 'Lượt ${_run.id} chưa bắt đầu in — quét tem máy in trước đã.'
+            : 'Lượt ${_run.id} đã chốt in xong rồi.',
+      );
+    }
+    if (soLoi > _run.quantity) {
+      throw ScanFailure('Mâm này chỉ có ${_run.quantity} con, không thể lỗi $soLoi con.');
+    }
+    final tin = await finishBulkRun(ref, _run, defectQuantity: soLoi);
     if (mounted) Navigator.pop(context, tin);
-    return null; // màn quét ngoài sẽ hiện thông báo, đừng toast hai lần
+    return null;
   }
 
   /// Chỉ bày ra thao tác dùng được với trạng thái hiện tại — bấm nhầm lúc đang vội là mất số liệu.
@@ -308,7 +373,8 @@ class _BulkRunSheetState extends ConsumerState<_BulkRunSheet> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Phải quét tem máy in đang chạy lượt này — máy thật có thể khác máy được chia lúc tạo đơn.',
+            'Phải quét tem máy in đang chạy lượt này — máy thật có thể khác máy được chia lúc tạo đơn.\n'
+            'Quét mã lượt khác để nhảy sang mâm đó ngay tại bảng này.',
             style: TextStyle(fontSize: 12, color: AppColors.muted, height: 1.35),
           ),
         ];
@@ -328,7 +394,8 @@ class _BulkRunSheetState extends ConsumerState<_BulkRunSheet> {
           const SizedBox(height: 8),
           Text(
             'Đã in ${Fmt.duration(DateTime.now().difference(_run.startedAt ?? DateTime.now()))}. '
-            'Chốt xong sẽ hỏi số con lỗi của mâm.',
+            'Bấm nút thì được hỏi số con lỗi.\n'
+            'Hoặc quét luôn: tem máy in = xong, không lỗi · QR số N = xong, N con lỗi.',
             style: const TextStyle(fontSize: 12, color: AppColors.muted, height: 1.35),
           ),
         ];
