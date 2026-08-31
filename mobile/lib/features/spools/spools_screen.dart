@@ -248,10 +248,16 @@ class _FilterChip extends StatelessWidget {
 
 /// Thẻ 1 cuộn nhựa — dùng chung ở danh sách cuộn, chi tiết kho và chi tiết máy in.
 class SpoolTile extends ConsumerWidget {
-  const SpoolTile({super.key, required this.spool, this.showPlace = true});
+  const SpoolTile({
+    super.key,
+    required this.spool,
+    this.showPlace = true,
+    this.trailingAction,
+  });
 
   final Spool spool;
   final bool showPlace;
+  final Widget? trailingAction;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -309,6 +315,7 @@ class SpoolTile extends ConsumerWidget {
                 onPressed: () => showWeighSheet(context, spool),
                 icon: const Icon(Icons.monitor_weight_outlined),
               ),
+              if (trailingAction != null) trailingAction!,
             ],
           ),
           const SizedBox(height: 10),

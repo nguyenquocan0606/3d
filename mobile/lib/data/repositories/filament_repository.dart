@@ -149,16 +149,24 @@ class FilamentRepository {
   /// Trả về ngay lập tức nên bảng cân phản hồi tức thì dù đang mất sóng. Worker
   /// đẩy lên sau; server áp luật ghi-đè-theo-giờ (kế hoạch §2.1).
   Future<void> updateSpoolWeight(String id, double remainingWeightG) async {
+    if (remainingWeightG <= 0) {
+      await _outbox.them(
+        loai: 'spool.deleteWhenEmpty',
+        payload: {'spoolId': id, 'remainingWeightG': 0},
+        moTa: 'Xóa cuộn $id vì đã hết nhựa',
+      );
+      await _store.xoaTamThoi(BangCache.spools, id);
+      return;
+    }
+
     await _outbox.them(
       loai: 'spool.weigh',
       payload: {'spoolId': id, 'remainingWeightG': remainingWeightG},
       moTa: 'Cân cuộn $id: ${remainingWeightG.round()}g',
     );
-    // Đoán luôn trạng thái theo đúng luật của server để danh sách không hiện
-    // "đang dùng" cho cuộn vừa cân về 0.
     await _store.vaTamThoi(BangCache.spools, id, {
       'remainingWeightG': remainingWeightG,
-      if (remainingWeightG <= 0) 'status': 'depleted' else 'status': 'active',
+      'status': 'active',
     });
   }
 

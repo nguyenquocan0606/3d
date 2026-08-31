@@ -1,0 +1,56 @@
+# Worker Slicer — chạy OrcaSlicer (binary build sẵn, KHÔNG sửa mã nguồn) ở chế độ CLI headless để
+# ra khối lượng nhựa + thời gian in THẬT cho tab Báo giá (bản 2 — xem scripts/slicer-worker.mjs).
+#
+# Vì sao base Ubuntu 24.04, không phải node:*-bookworm-slim như Dockerfile.zalo-worker: AppImage
+# của OrcaSlicer build cho Ubuntu 24.04 cần glibc 2.39+ — Debian bookworm chỉ có glibc 2.36, chạy
+# thẳng sẽ báo "version `GLIBC_2.38' not found". Đã tự tay xác nhận (extract + ldd) glibc của
+# ubuntu:24.04 chạy được binary này, Debian bookworm/trixie thì không/chưa ổn định.
+FROM ubuntu:24.04
+
+ARG ORCASLICER_VERSION=v2.4.2
+ARG ORCASLICER_ASSET=OrcaSlicer_Linux_AppImage_Ubuntu2404_V2.4.2.AppImage
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# nodejs: Ubuntu 24.04 có sẵn bản 18.19 trong repo chính thức — đủ dùng (worker chỉ cần
+#   node:http/child_process/fs, không phụ thuộc gói npm nào) nên khỏi phải thêm repo NodeSource.
+# xvfb + libopengl0/libglu1-mesa/libgtk-3-0t64/libwebkit2gtk-4.1-0/libsecret-1-0/
+#   libgstreamer-plugins-base1.0-0/libmspack0: toàn bộ thư viện OrcaSlicer cần lúc chạy — danh sách
+#   này chốt bằng cách tự chạy `ldd` trên binary đã giải nén tới khi hết báo "not found", không
+#   đoán suông.
+RUN apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends \
+        nodejs \
+        ca-certificates \
+        curl \
+        xvfb \
+        libopengl0 \
+        libglu1-mesa \
+        libgtk-3-0t64 \
+        libwebkit2gtk-4.1-0 \
+        libsecret-1-0 \
+        libgstreamer-plugins-base1.0-0 \
+        libmspack0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Tải AppImage, giải nén 1 lần lúc build (--appimage-extract không cần FUSE — Docker container
+# thường không có /dev/fuse) rồi xóa AppImage nén đi, chỉ giữ lại thư mục đã giải nén.
+RUN mkdir -p /opt/orcaslicer-src && cd /opt/orcaslicer-src \
+    && curl -fL -o orcaslicer.AppImage \
+        "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/${ORCASLICER_VERSION}/${ORCASLICER_ASSET}" \
+    && chmod +x orcaslicer.AppImage \
+    && ./orcaslicer.AppImage --appimage-extract >/dev/null \
+    && mv squashfs-root /opt/orcaslicer \
+    && cd / && rm -rf /opt/orcaslicer-src
+
+WORKDIR /app
+COPY scripts/slicer-worker.mjs ./scripts/slicer-worker.mjs
+
+# Chạy bằng user thường: container này chạy 1 binary xử lý file người dùng tải lên, không có lý do
+# gì cần quyền root ở đây.
+RUN useradd --create-home --shell /bin/bash slicer \
+    && mkdir -p /app/data/quote-uploads \
+    && chown -R slicer:slicer /app /opt/orcaslicer
+USER slicer
+
+CMD ["node", "scripts/slicer-worker.mjs"]

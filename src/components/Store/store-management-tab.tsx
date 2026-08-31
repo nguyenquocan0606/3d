@@ -2,6 +2,7 @@
 
 import React, { ChangeEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import TheNguoiDung, { useNguoiDungHienTai } from '@/components/Auth/the-nguoi-dung';
 import QRCode from 'qrcode';
 import {
   AlertTriangle,
@@ -564,6 +565,9 @@ function useDoRongCot(soCot: number) {
 }
 
 export default function StoreManagementTab() {
+  // Trang này là nơi duy nhất nhân viên vào được, nên header phải tự lo chỗ đăng xuất.
+  const nguoiDungHienTai = useNguoiDungHienTai();
+
   const [sanPham, setSanPham] = useState<SanPham[]>([]);
   const [truongRieng, setTruongRieng] = useState<TruongRieng[]>(truongMacDinh);
   const [daTaiDuLieu, setDaTaiDuLieu] = useState(false);
@@ -1694,12 +1698,15 @@ export default function StoreManagementTab() {
       {/* Thanh tiêu đề trang kiêm luôn 4 chỉ số tổng — gộp vào một hàng để chừa tối đa chiều cao cho
           danh sách và khung chi tiết (trang không cuộn được, mọi thứ phải nằm gọn trong 1 màn hình). */}
       <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-slate-200 bg-white px-4 py-2.5 dark:border-slate-800 dark:bg-[#090d16]">
-        <Link
-          href="/"
-          className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-        >
-          &larr; Quay lại
-        </Link>
+        {/* Nhân viên không có trang nào khác để quay về (middleware đẩy ngược lại đây), nên giấu nút. */}
+        {nguoiDungHienTai?.vaiTro !== 'nhanVien' && (
+          <Link
+            href="/"
+            className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            &larr; Quay lại
+          </Link>
+        )}
         <span className="flex size-8 items-center justify-center rounded-lg bg-indigo-600/10 text-indigo-500 dark:bg-indigo-500/15 dark:text-indigo-300">
           <Store className="size-4" />
         </span>
@@ -1721,6 +1728,7 @@ export default function StoreManagementTab() {
             }}
             moTa={chiSapHet ? 'Đang lọc — bấm để bỏ lọc' : 'Bấm để chỉ xem hàng sắp hết'}
           />
+          <TheNguoiDung thuGon huong="xuong" />
         </div>
       </header>
 

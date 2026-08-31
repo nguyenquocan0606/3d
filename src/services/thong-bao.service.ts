@@ -41,6 +41,8 @@ export type SuKienMoi = {
   nhietBan?: number | null;
   /** Ghi đè mức độ mặc định của loại (VD lỗi nhẹ chỉ cảnh báo). */
   mucDo?: string;
+  /** Đoạn chỉ Zalo nhận thêm, nối vào cuối tin (VD khối mã HMS). Không vào lịch sử, không sang kênh khác. */
+  kemZalo?: string;
 };
 
 export async function layCaiDat() {
@@ -122,6 +124,7 @@ export async function ghiVaGuiSuKien(suKien: SuKienMoi) {
     mucDo,
     tieuDe: `${meta.icon} ${suKien.tieuDe}`,
     noiDung: suKien.noiDung,
+    kemZalo: suKien.kemZalo,
     duLieu: {
       suKienId: dong.id,
       printerId: suKien.printerId,
@@ -146,8 +149,15 @@ export async function guiDi(input: {
   tieuDe: string;
   noiDung: string;
   duLieu?: Record<string, string>;
-  /** Số liệu kèm theo, chỉ Discord dùng — Zalo và app đẩy chỉ có chỗ cho một dòng chữ. */
+  /** Số liệu kèm theo, chỉ Discord dùng — app đẩy chỉ có chỗ cho một dòng chữ. */
   chiTiet?: Array<{ ten: string; giaTri: string }>;
+  /**
+   * Đoạn chỉ Zalo nhận thêm, nối vào cuối tin.
+   *
+   * Zalo là kênh duy nhất người ta đọc lúc đang trên đường ra máy nên đáng để dài thêm vài dòng
+   * (khối mã HMS); Discord đã có bảng số liệu riêng, còn app đẩy dài quá thì bị cắt.
+   */
+  kemZalo?: string;
 }): Promise<{ daGui: boolean; loiGui: string | null }> {
   const loi: string[] = [];
   let daGui = false;
@@ -191,7 +201,7 @@ export async function guiDi(input: {
       try {
         await guiTinNhan({
           threadId: caiDat.zaloThreadId,
-          text: `${input.tieuDe}\n${input.noiDung}`,
+          text: `${input.tieuDe}\n${input.noiDung}${input.kemZalo ?? ''}`,
         });
         daGui = true;
       } catch (e) {

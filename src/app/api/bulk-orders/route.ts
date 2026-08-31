@@ -25,6 +25,9 @@ export async function GET() {
  *
  * `printerLimits` (tùy chọn) khai số con/mâm riêng cho từng máy — máy khổ bàn khác
  * nhau thì xếp được số con khác nhau; máy không khai thì dùng `perSheetQty` chung.
+ *
+ * `printerTimes` (tùy chọn) khai số phút in 1 mâm đầy của từng máy. Khai đủ cho mọi máy thì lượt
+ * được chia sao cho các máy xong gần như cùng lúc, thay vì chia đều số mâm.
  */
 export async function POST(req: Request) {
   try {
@@ -37,6 +40,7 @@ export async function POST(req: Request) {
       perSheetQty,
       printerIds,
       printerLimits,
+      printerTimes,
       note,
     } = body as {
       orderCode?: string;
@@ -46,6 +50,7 @@ export async function POST(req: Request) {
       perSheetQty?: number | string;
       printerIds?: string[];
       printerLimits?: Record<string, number>;
+      printerTimes?: Record<string, number>;
       note?: string;
     };
 
@@ -64,6 +69,7 @@ export async function POST(req: Request) {
         perSheetQty: Number(perSheetQty),
         printerIds: printerIds ?? [],
         printerLimits,
+        printerTimes,
       });
     } catch (error) {
       if (error instanceof LoiChiaLuot) return fail(error.message, 400);

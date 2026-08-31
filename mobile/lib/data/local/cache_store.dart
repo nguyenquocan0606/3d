@@ -124,6 +124,16 @@ class CacheStore {
     );
   }
 
+  /// Xóa lạc quan một bản ghi khỏi cache cục bộ.
+  ///
+  /// Dùng cho các thao tác mà kết quả nghiệp vụ là bản ghi biến mất ngay trên
+  /// màn hình, ví dụ cân cuộn về 0g thì bỏ cuộn khỏi danh sách thay vì giữ lại
+  /// rồi lần quét sau trông như một cuộn mới.
+  Future<void> xoaTamThoi(String bang, String id) async {
+    final d = await _db.db;
+    await d.delete('cache_ban_ghi', where: 'bang = ? AND id = ?', whereArgs: [bang, id]);
+  }
+
   /// Chèn bản ghi mới vào cache — dùng cho thao tác **tạo mới lạc quan**.
   ///
   /// Khác với [vaTamThoi] (chỉ sửa bản ghi đã tồn tại), phương thức này tạo luôn

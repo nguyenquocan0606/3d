@@ -33,7 +33,8 @@ export default function UpdateWeightModal({
   const [printerId, setPrinterId] = useState<string>('');
 
   // Lấy dữ liệu live từ MQTT (dùng chung 1 kết nối qua ScaleProvider)
-  const { weight: liveWeight, isConnected: isScaleConnected } = useScale();
+  // steadyWeight: số đã lọc nhiễu, không nhảy lăng tăng khi đang cân
+  const { steadyWeight: liveWeight, isConnected: isScaleConnected } = useScale();
 
   const liveWeightRef = React.useRef(0);
   useEffect(() => {

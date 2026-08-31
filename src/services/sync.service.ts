@@ -111,6 +111,32 @@ async function canCuon(t: ThaoTacDongBo): Promise<KetQuaThaoTac> {
   return nhan(true);
 }
 
+/**
+ * Xóa cuộn khi cân về 0g từ app mobile.
+ *
+ * Có kiểm tra mốc thời gian để một thao tác offline cũ không xóa nhầm cuộn mới
+ * nếu mã đã được giải phóng rồi dùng lại.
+ */
+async function xoaCuonDaHet(t: ThaoTacDongBo): Promise<KetQuaThaoTac> {
+  const spoolId = chuoi(t.payload.spoolId);
+  if (!spoolId) return nhan(false, 'Thiếu mã cuộn.');
+
+  const cuon = await prisma.spool.findUnique({ where: { id: spoolId } });
+  if (!cuon) return nhan(true, `Cuộn ${spoolId} đã được xóa trước đó.`);
+
+  if (cuon.createdAt > t.taoLuc) {
+    return nhan(false, `Mã ${spoolId} đã được dùng cho cuộn mới sau lúc bạn cân — không xóa cuộn mới.`);
+  }
+
+  if (cuon.updatedAt > t.taoLuc && cuon.remainingWeightG > 0) {
+    return nhan(false, `Cuộn ${spoolId} đã có số cân mới hơn (${cuon.remainingWeightG}g), nên không xóa.`);
+  }
+
+  await prisma.spool.delete({ where: { id: spoolId } });
+  await ghiBiaMo('spools', spoolId);
+  return nhan(true);
+}
+
 /** Gán / tháo cuộn khỏi kho, máy in, slot AMS. LWW như cân. */
 async function ganCuon(t: ThaoTacDongBo): Promise<KetQuaThaoTac> {
   const spoolId = chuoi(t.payload.spoolId);
@@ -144,18 +170,42 @@ async function ganCuon(t: ThaoTacDongBo): Promise<KetQuaThaoTac> {
  */
 async function taoCuon(t: ThaoTacDongBo): Promise<KetQuaThaoTac> {
   const id = chuoi(t.payload.id);
-  const filamentId = chuoi(t.payload.filamentId);
+  let filamentId = chuoi(t.payload.filamentId);
   const banDau = so(t.payload.initialWeightG);
   const conLai = so(t.payload.remainingWeightG);
-  if (!id || !filamentId || banDau === null || conLai === null) {
-    return nhan(false, 'Thiếu thông tin bắt buộc để tạo cuộn.');
+  if (!id || banDau === null || conLai === null) {
+    return nhan(false, 'Thiếu mã cuộn, khối lượng ban đầu hoặc khối lượng còn lại.');
   }
 
   const daCo = await prisma.spool.findUnique({ where: { id } });
-  if (daCo) return nhan(false, `Mã cuộn ${id} đã tồn tại — máy khác đã tạo trước.`);
+  if (daCo) return nhan(false, 'Mã cuộn ' + id + ' đã tồn tại — máy khác đã tạo trước.');
 
-  const loaiNhua = await prisma.filament.findUnique({ where: { id: filamentId } });
-  if (!loaiNhua) return nhan(false, `Không tìm thấy loại nhựa ${filamentId}.`);
+  if (filamentId) {
+    const loaiNhua = await prisma.filament.findUnique({ where: { id: filamentId } });
+    if (!loaiNhua) return nhan(false, 'Không tìm thấy loại nhựa ' + filamentId + '.');
+  } else {
+    const type = chuoi(t.payload.type);
+    const colorName = chuoi(t.payload.colorName);
+    const brand = chuoi(t.payload.brand) || null;
+    if (!type || !colorName) {
+      return nhan(false, 'Thiếu loại nhựa hoặc tên màu để tạo cuộn.');
+    }
+
+    let loaiNhua = await prisma.filament.findFirst({
+      where: {
+        type: { equals: type, mode: 'insensitive' },
+        colorName: { equals: colorName, mode: 'insensitive' },
+        brand: brand ? { equals: brand, mode: 'insensitive' } : null,
+      },
+    });
+
+    if (!loaiNhua) {
+      loaiNhua = await prisma.filament.create({
+        data: { type, colorName, colorHex: chuoi(t.payload.colorHex) || null, brand },
+      });
+    }
+    filamentId = loaiNhua.id;
+  }
 
   await prisma.spool.create({
     data: {
@@ -420,6 +470,7 @@ async function dieuChinhTonKho(t: ThaoTacDongBo): Promise<KetQuaThaoTac> {
 
 const BO_XU_LY: Record<string, (t: ThaoTacDongBo) => Promise<KetQuaThaoTac>> = {
   'spool.weigh': canCuon,
+  'spool.deleteWhenEmpty': xoaCuonDaHet,
   'spool.bind': ganCuon,
   'spool.create': taoCuon,
   'printItem.setStatus': datTrangThaiMiengIn,
@@ -435,6 +486,7 @@ const BO_XU_LY: Record<string, (t: ThaoTacDongBo) => Promise<KetQuaThaoTac>> = {
 /** Các bảng bị ảnh hưởng theo loại thao tác — dùng để báo MQTT cho máy khác. */
 const BANG_ANH_HUONG: Record<string, string[]> = {
   'spool.weigh': ['spools'],
+  'spool.deleteWhenEmpty': ['spools'],
   'spool.bind': ['spools'],
   'spool.create': ['spools'],
   'printItem.setStatus': ['printItems'],

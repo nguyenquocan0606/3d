@@ -153,11 +153,19 @@ class PrinterCard extends StatelessWidget {
               children: [
                 const Icon(Icons.schedule_rounded, size: 13, color: AppColors.muted),
                 const SizedBox(width: 5),
-                Text(
-                  'Còn ${Fmt.durationFromSeconds(live!.remainingTimeSeconds)}',
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                Expanded(
+                  child: Text(
+                    () {
+                      final conLai = Fmt.durationFromSeconds(live!.remainingTimeSeconds);
+                      final xong = Fmt.etaFromSeconds(live!.remainingTimeSeconds);
+                      return xong == null ? 'Còn $conLai' : 'Còn $conLai · xong $xong';
+                    }(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                  ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 8),
                 Text(
                   '${live!.nozzleTemp.round()}° / ${live!.bedTemp.round()}°',
                   style: const TextStyle(fontSize: 12, color: AppColors.muted),

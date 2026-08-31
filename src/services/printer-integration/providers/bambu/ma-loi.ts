@@ -179,12 +179,12 @@ export function docHmsTuHa(attrs: Record<string, unknown> | undefined | null): L
 }
 
 /**
- * Câu mô tả lỗi dùng để BẮN THÔNG BÁO (Zalo/FCM).
+ * Câu mô tả lỗi dùng để QUYẾT ĐỊNH có bắn thông báo hay không (Zalo/FCM).
  *
  * Cố ý **không** gộp lỗi HMS vào đây. HMS phần lớn là chuyện dai dẳng — firmware AMS lệch phiên
  * bản, nhắc tra dầu trục — máy vẫn in ngon lành mà cứ réo thì chỉ tổ làm người ta tắt thông báo,
- * rồi lúc thật sự tắc đầu phun lại không ai hay. HMS vẫn được trả nguyên mảng trong payload cho
- * web và app hiện ra, chỉ là không đánh thức ai.
+ * rồi lúc thật sự tắc đầu phun lại không ai hay. Muốn ĐÍNH mã HMS vào một thông báo đã chắc chắn
+ * phải gửi thì dùng `dongHmsDeBao()` — đính kèm khác hẳn với tự mình réo lên.
  */
 export function moTaLoiDeBao(chanDoan: ChanDoan, printError: string | null): string | null {
   const phan: string[] = [];
@@ -195,4 +195,22 @@ export function moTaLoiDeBao(chanDoan: ChanDoan, printError: string | null): str
     phan.push(chu ? `${chu} (${printError})` : `mã lỗi ${printError}`);
   }
   return phan.length > 0 ? phan.join(' · ') : null;
+}
+
+/**
+ * Các dòng HMS để đính vào thông báo — đúng thứ web đang hiện: mã 4 cụm, mô tả tiếng Việt, mức độ.
+ *
+ * Trước đây tin Zalo chỉ có mỗi lý do dừng, thợ cầm điện thoại ra tới máy vẫn phải mở web mới biết
+ * mã nào mà tra wiki. Vẫn giữ nguyên luật: HMS không tự sinh thông báo (xem `moTaLoiDeBao`), chỉ đi
+ * ké khi đã có việc khác phải báo.
+ *
+ * Cắt bớt khi máy ôm quá nhiều lỗi: tin nhắn dài mấy chục dòng thì người ta lướt qua, mà lỗi nặng
+ * đã được provider xếp lên đầu mảng rồi.
+ */
+export function dongHmsDeBao(hms: LoiHms[], toiDa = 5): string[] {
+  const dong = hms
+    .slice(0, toiDa)
+    .map((l) => `• ${l.ma}${l.moTa ? ` — ${l.moTa}` : ''} (${l.mucDo})`);
+  if (hms.length > toiDa) dong.push(`• …và ${hms.length - toiDa} lỗi nữa, xem trên web.`);
+  return dong;
 }

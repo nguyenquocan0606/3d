@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/format/formatters.dart';
+import '../../core/scale/scale_audio.dart';
 import '../../core/scan/pda_scan.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../../data/models/filament.dart';
 import '../../data/providers.dart';
+import '../../data/repositories/filament_repository.dart';
 import '../scanner/scanner_screen.dart';
 import '../spools/spools_screen.dart';
 
@@ -54,6 +56,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   _ScanFeedback? _feedback;
   Timer? _feedbackTimer;
   bool _undoing = false;
+  String? _deletingSpoolId;
 
   static const _feedbackDuration = Duration(seconds: 2);
 
@@ -117,16 +120,36 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
 
     // Chấp nhận mã đã bỏ gạch nối (PLAWHT01) như bản web.
     final spools = ref.read(spoolsProvider).valueOrNull ?? const [];
+    final scanned =
+        ref.read(inventorySessionProvider).valueOrNull?.scannedMap ??
+            const <String, bool>{};
     final normalized = code.replaceAll('-', '').toUpperCase();
     var spoolId = code.trim();
+    Spool? matchedSpool;
     for (final spool in spools) {
       if (spool.id.replaceAll('-', '').toUpperCase() == normalized) {
         spoolId = spool.id;
+        matchedSpool = spool;
         break;
       }
     }
 
-    final result = await ref.read(inventorySessionProvider.notifier).scan(spoolId);
+    if (scanned[spoolId] ?? false) {
+      await ref.read(scaleAudioProvider).speak('error');
+      _showFeedback((
+        title: 'Trùng $spoolId',
+        subtitle: matchedSpool == null
+            ? 'Cuộn này đã được quét trong phiên kiểm kho.'
+            : '${matchedSpool.filamentType} ${matchedSpool.filamentColorName} · '
+                'đã quét rồi',
+        colorHex: matchedSpool?.filamentColorHex,
+        isError: true,
+      ));
+      return 'Trùng $spoolId — cuộn này đã quét rồi.';
+    }
+
+    final result =
+        await ref.read(inventorySessionProvider.notifier).scan(spoolId);
     _showFeedback((
       title: result.spoolId,
       subtitle: '${result.filamentType} ${result.colorName} · '
@@ -159,7 +182,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     if (_undoing) return;
     setState(() => _undoing = true);
     try {
-      final result = await ref.read(inventorySessionProvider.notifier).undoLastScan();
+      final result =
+          await ref.read(inventorySessionProvider.notifier).undoLastScan();
       _showFeedback((
         title: 'Đã bỏ ${result.spoolId}',
         subtitle: result.colorName.isEmpty
@@ -196,6 +220,41 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     }
   }
 
+  /// Xóa ngay cuộn không tìm thấy trong lúc kiểm kho.
+  ///
+  /// Chỉ hiện cho nhóm chưa quét: đó là luồng kiểm thực tế "không thấy cuộn trên
+  /// kệ nữa thì dọn khỏi hệ thống" mà không phải rời màn kiểm kho.
+  Future<void> _deleteUnscannedSpool(Spool spool) async {
+    if (_deletingSpoolId != null) return;
+
+    final ok = await confirmAction(
+      context,
+      title: 'Xóa cuộn chưa kiểm',
+      message: 'Xóa vĩnh viễn cuộn ${spool.id}? Chỉ dùng khi đã tìm trên kệ '
+          'nhưng không còn thấy cuộn này.',
+      confirmLabel: 'Xóa',
+    );
+    if (!ok) return;
+
+    setState(() => _deletingSpoolId = spool.id);
+    try {
+      await ref.read(filamentRepositoryProvider).deleteSpool(spool.id);
+      await refreshCoreData(ref);
+      if (!mounted) return;
+      _showFeedback((
+        title: 'Đã xóa ${spool.id}',
+        subtitle: '${spool.filamentType} ${spool.filamentColorName}',
+        colorHex: spool.filamentColorHex,
+        isError: false,
+      ));
+      showToast(context, 'Đã xóa cuộn ${spool.id}.');
+    } catch (error) {
+      if (mounted) showToast(context, '$error', isError: true);
+    } finally {
+      if (mounted) setState(() => _deletingSpoolId = null);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // Máy PDA: đứng ngay đây bóp cò từng cuộn trên kệ, khỏi mở màn quét.
@@ -209,7 +268,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   Widget _buildScreen(BuildContext context) {
     final sessionAsync = ref.watch(inventorySessionProvider);
     final spools = ref.watch(spoolsProvider).valueOrNull ?? const <Spool>[];
-    final scanned = sessionAsync.valueOrNull?.scannedMap ?? const <String, bool>{};
+    final scanned =
+        sessionAsync.valueOrNull?.scannedMap ?? const <String, bool>{};
 
     final visible = _apply(spools, scanned);
     final relevant = spools
@@ -301,7 +361,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                       value: ratio,
                       minHeight: 8,
                       backgroundColor: AppColors.border,
-                      valueColor: const AlwaysStoppedAnimation(AppColors.success),
+                      valueColor:
+                          const AlwaysStoppedAnimation(AppColors.success),
                     ),
                   ),
                 ],
@@ -337,7 +398,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                 FilterChip(
                   label: const Text('Mọi trạng thái'),
                   selected: _showAllStatuses,
-                  onSelected: (value) => setState(() => _showAllStatuses = value),
+                  onSelected: (value) =>
+                      setState(() => _showAllStatuses = value),
                 ),
               ],
             ),
@@ -346,7 +408,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
           Expanded(
             child: AsyncView(
               value: sessionAsync,
-              onRetry: () => ref.read(inventorySessionProvider.notifier).refresh(),
+              onRetry: () =>
+                  ref.read(inventorySessionProvider.notifier).refresh(),
               builder: (_) {
                 if (visible.isEmpty) {
                   return const EmptyView(
@@ -361,11 +424,32 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                   itemBuilder: (context, index) {
                     final spool = visible[index];
                     final isScanned = scanned[spool.id] ?? false;
+                    final isDeleting = _deletingSpoolId == spool.id;
+                    final deleteAction = isScanned
+                        ? null
+                        : IconButton(
+                            tooltip: 'Xóa cuộn chưa kiểm',
+                            onPressed: isDeleting
+                                ? null
+                                : () => _deleteUnscannedSpool(spool),
+                            icon: isDeleting
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(
+                                    Icons.delete_outline_rounded,
+                                    color: AppColors.danger,
+                                  ),
+                          );
                     return Opacity(
                       opacity: isScanned ? 0.55 : 1,
                       child: Stack(
                         children: [
-                          SpoolTile(spool: spool),
+                          SpoolTile(spool: spool, trailingAction: deleteAction),
                           if (isScanned)
                             const Positioned(
                               right: 12,
@@ -414,11 +498,13 @@ class _ScanFeedbackBar extends StatelessWidget {
       child: Row(
         children: [
           if (feedback.isError)
-            const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 20)
+            const Icon(Icons.error_outline_rounded,
+                color: AppColors.danger, size: 20)
           else if (feedback.colorHex != null)
             ColorDot(hex: feedback.colorHex, size: 20)
           else
-            const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 20),
+            const Icon(Icons.check_circle_rounded,
+                color: AppColors.success, size: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -435,7 +521,8 @@ class _ScanFeedbackBar extends StatelessWidget {
                 if (feedback.subtitle != null)
                   Text(
                     feedback.subtitle!,
-                    style: const TextStyle(color: AppColors.muted, fontSize: 13),
+                    style:
+                        const TextStyle(color: AppColors.muted, fontSize: 13),
                   ),
               ],
             ),

@@ -53,5 +53,29 @@ services:
       - ./data/zalo-attachments:/app/data/zalo-attachments
     restart: unless-stopped
 
+  # Worker Slicer: chạy OrcaSlicer headless (bản 2 tab Báo giá) — xem scripts/slicer-worker.mjs.
+  # KHÔNG có DATABASE_URL/quyền truy cập Postgres: container này chạy 1 binary xử lý file khách tải
+  # lên, cô lập khỏi mọi thứ khác trong hệ thống — chỉ nhận job qua HTTP và tự gọi ngược
+  # (`callbackUrl` do Next chỉ định trong từng job) để báo kết quả.
+  slicer-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.slicer-worker
+    container_name: 3d_manage_slicer_worker
+    environment:
+      SLICER_WORKER_TOKEN: ${SLICER_WORKER_TOKEN}
+    ports:
+      - "127.0.0.1:39300:39300"
+    volumes:
+      # Bind mount (không phải named volume): app Next chạy NGOÀI Docker phải ghi được file vào
+      # đây, worker trong Docker chỉ cần ĐỌC lại đúng file đó.
+      - ./data/quote-uploads:/app/data/quote-uploads:ro
+    # Cho worker gọi ngược về Next chạy trên máy chủ (NGOÀI Docker, xem comment Dockerfile.zalo-worker)
+    # qua tên `host.docker.internal` — mặc định Docker Engine trên Linux không có sẵn tên này như
+    # Docker Desktop, phải khai rõ bằng extra_hosts.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
 volumes:
   postgres_data:

@@ -40,6 +40,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       perSheetQty,
       printerIds,
       printerLimits,
+      printerTimes,
       suaLuotDaChay,
     } = await req.json();
 
@@ -67,7 +68,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       try {
         keHoach = await chuanBiChiaLai(
           hienTai.runs,
-          { totalQuantity: tongMoi, perSheetQty: mamMoi, printerIds, printerLimits },
+          { totalQuantity: tongMoi, perSheetQty: mamMoi, printerIds, printerLimits, printerTimes },
           // Mặc định bật: đổi sức chứa mâm phần lớn là do nhập nhầm, phải sửa cả mâm đã in.
           suaLuotDaChay !== false
         );

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Cloud, Printer, Edit2, Play, Pause, Square, LayoutDashboard, Settings2, Wind, Info, RefreshCw } from 'lucide-react';
 import { TinhTrangMay } from './tinh-trang-may';
 import { PrinterDetailsModal } from './PrinterDetailsModal';
+import { gioDuKienXong } from '@/utils/gio-du-kien';
 
 interface CloudPrinterCardProps {
   printer: any;
@@ -64,6 +65,7 @@ export function CloudPrinterCard({ printer, liveStatus, onOpenQR, onManage }: Cl
       ? `${Math.floor(remainingMins / 60)}h ${remainingMins % 60}m`
       : `${remainingMins}m`
     : null;
+  const gioXong = gioDuKienXong(liveStatus?.remainingTimeSeconds);
 
   return (
     <div className="flex flex-col bg-slate-900 border border-slate-700/80 rounded-2xl overflow-hidden w-full transition-all hover:border-slate-600/80 shadow-lg shadow-black/20">
@@ -148,10 +150,15 @@ export function CloudPrinterCard({ printer, liveStatus, onOpenQR, onManage }: Cl
                   {isAuthFailed ? <span className="text-red-400">Vui lòng kết nối lại Cloud</span> : isPrinting ? fileName : 'No active task'}
                 </h4>
                 
+                {/* flex-wrap + nowrap từng ô: thẻ hẹp thì xuống dòng giữa hai ô, chứ không
+                    cắt đôi giá trị kiểu "4h / 39m" */}
                 {isPrinting && (
-                  <div className="flex items-center gap-3 text-xs text-slate-400 font-mono">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-400 font-mono">
                     {remainingLabel !== null && (
-                      <span>Time left: <span className="text-slate-200 font-bold text-sm">{remainingLabel}</span></span>
+                      <span className="whitespace-nowrap">Time left: <span className="text-slate-200 font-bold text-sm">{remainingLabel}</span></span>
+                    )}
+                    {gioXong && (
+                      <span className="whitespace-nowrap">Dự kiến xong: <span className="text-slate-200 font-bold text-sm">{gioXong}</span></span>
                     )}
                   </div>
                 )}

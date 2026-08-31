@@ -229,6 +229,10 @@ class _StatusCard extends StatelessWidget {
               label: 'Thời gian còn',
               value: Fmt.durationFromSeconds(live!.remainingTimeSeconds),
             ),
+            InfoRow(
+              label: 'Dự kiến xong',
+              value: Fmt.etaFromSeconds(live!.remainingTimeSeconds) ?? '—',
+            ),
             if (live!.currentLayer != null && live!.totalLayers != null)
               InfoRow(
                 label: 'Lớp',

@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   chiaLuotIn,
   chiaLuotInTheoMay,
+  taiTheoMay,
+  dinhDangPhut,
   trangThaiDon,
   dinhDangThoiLuong,
   tongSoLoi,
@@ -65,6 +67,85 @@ describe('chiaLuotInTheoMay', () => {
   it('sức chứa <= 0 thì trả mảng rỗng thay vì lặp vô hạn', () => {
     expect(chiaLuotInTheoMay(100, [50, 0])).toEqual([]);
     expect(chiaLuotInTheoMay(100, [])).toEqual([]);
+  });
+});
+
+describe('chia theo thời gian in để các máy xong cùng lúc', () => {
+  // Đúng ca đang gặp ngoài xưởng: ba máy mâm 35 con, một máy mâm 61 con. Mâm 61 in lâu hơn hẳn
+  // nên chia đều số mâm là máy 61 con về đích sau cùng, mấy máy kia đứng không.
+  const suc = [35, 35, 61, 35];
+  const phut = [6 * 60, 6 * 60, 9 * 60, 5.5 * 60];
+
+  /** Giờ kết thúc dự kiến của từng máy có nhận việc. */
+  const mocXong = (tong: number, gio: number[] | null) => {
+    const luots = chiaLuotInTheoMay(tong, suc, gio);
+    return taiTheoMay(luots, suc, phut)
+      .filter((t) => t.soLuot > 0)
+      .map((t) => t.phut as number);
+  };
+
+  it('khai đủ giờ thì khoảng lệch giữa máy xong sớm nhất và muộn nhất co lại rõ rệt', () => {
+    const chiaDeu = mocXong(625, null);
+    const canGio = mocXong(625, phut);
+    const lech = (m: number[]) => Math.max(...m) - Math.min(...m);
+
+    expect(lech(chiaDeu)).toBeGreaterThan(18 * 60); // lệch gần 19 tiếng
+    expect(lech(canGio)).toBeLessThanOrEqual(3 * 60);
+    // Không được đánh đổi bằng việc chạy lâu hơn: máy về đích cuối cùng phải sớm hơn trước.
+    expect(Math.max(...canGio)).toBeLessThan(Math.max(...chiaDeu));
+  });
+
+  it('vẫn đủ số con và mâm nào cũng không vượt sức chứa của máy đó', () => {
+    const luots = chiaLuotInTheoMay(625, suc, phut);
+    expect(luots.reduce((s, l) => s + l.quantity, 0)).toBe(625);
+    expect(luots.every((l) => l.quantity <= suc[l.printerIndex])).toBe(true);
+    // peiIndex đếm liên tục 1..n trên từng máy, không hụt số nào.
+    for (let i = 0; i < suc.length; i++) {
+      const cua = luots.filter((l) => l.printerIndex === i).map((l) => l.peiIndex);
+      expect(cua).toEqual(cua.map((_, k) => k + 1));
+    }
+  });
+
+  it('máy nhanh nhận nhiều mâm hơn máy chậm', () => {
+    // Máy 0 in 1 mâm mất 2 tiếng, máy 1 mất 6 tiếng → máy 0 phải chạy gấp ba.
+    const luots = chiaLuotInTheoMay(400, [50, 50], [120, 360]);
+    const soMam = [0, 1].map((i) => luots.filter((l) => l.printerIndex === i).length);
+    expect(soMam[0]).toBeGreaterThan(soMam[1] * 2);
+  });
+
+  it('vòng đầu vẫn đi đúng thứ tự người dùng bấm chọn', () => {
+    const luots = chiaLuotInTheoMay(500, [50, 50, 50], [100, 100, 100]);
+    expect(luots.slice(0, 3).map((l) => l.printerIndex)).toEqual([0, 1, 2]);
+  });
+
+  it('thiếu giờ của bất kỳ máy nào thì quay về chia vòng tròn như cũ', () => {
+    const thieu = chiaLuotInTheoMay(400, [50, 50], [120, 0]);
+    expect(thieu.map((l) => l.printerIndex)).toEqual(chiaLuotInTheoMay(400, [50, 50]).map((l) => l.printerIndex));
+    // Sai độ dài mảng cũng vậy — không được lấy giờ của máy này áp cho máy kia.
+    expect(chiaLuotInTheoMay(400, [50, 50], [120]).map((l) => l.printerIndex)).toEqual([0, 1, 0, 1, 0, 1, 0, 1]);
+  });
+
+  it('mâm lẻ cuối chỉ chiếm thời gian theo tỉ lệ số con', () => {
+    // 1 máy, mâm 50 con hết 100 phút: 60 con = 1 mâm đầy + mâm 10 con → 100 + 20 phút.
+    const luots = chiaLuotInTheoMay(60, [50], [100]);
+    expect(taiTheoMay(luots, [50], [100])[0].phut).toBeCloseTo(120);
+  });
+
+  it('chưa khai giờ thì taiTheoMay chỉ đếm mâm và con, không bịa ra thời gian', () => {
+    const luots = chiaLuotInTheoMay(150, [100, 40]);
+    expect(taiTheoMay(luots, [100, 40])).toEqual([
+      { printerIndex: 0, soLuot: 2, soCon: 110, phut: null },
+      { printerIndex: 1, soLuot: 1, soCon: 40, phut: null },
+    ]);
+  });
+});
+
+describe('dinhDangPhut', () => {
+  it('rút gọn ra giờ và phút', () => {
+    expect(dinhDangPhut(135)).toBe('2g 15p');
+    expect(dinhDangPhut(45)).toBe('45p');
+    expect(dinhDangPhut(0)).toBe('0p');
+    expect(dinhDangPhut(NaN)).toBe('—');
   });
 });
 
@@ -230,6 +311,23 @@ describe('chiaLaiGiuTienDo', () => {
     expect(keHoach.capNhat).toEqual([
       { id: 'ma-3', printerIndex: 0, seq: 3, peiIndex: 3, quantity: 28 },
     ]);
+  });
+
+  it('chia lại có khai giờ: phần chưa chạy dồn về máy nhanh, lượt đã chạy không bị đụng', () => {
+    // Máy A (mâm 50, 6 tiếng) đã in xong 1 mâm; máy B (mâm 50, 2 tiếng) nhanh gấp ba.
+    const runs: LuotDaCo[] = [
+      luot({ id: 'ma-1', seq: 1, printerId: 'A', status: 'completed' }),
+      luot({ id: 'ma-2', seq: 2, printerId: 'A' }),
+      luot({ id: 'ma-3', seq: 3, printerId: 'A' }),
+      luot({ id: 'ma-4', seq: 4, printerId: 'A' }),
+    ];
+    const keHoach = chiaLaiGiuTienDo(runs, 400, ['A', 'B'], [50, 50], true, [360, 120]);
+    const moi = [...keHoach.capNhat, ...keHoach.themMoi];
+
+    expect(keHoach.giuNguyen.map((r) => r.id)).toEqual(['ma-1']);
+    expect(moi.reduce((s, l) => s + l.quantity, 0)).toBe(350); // 400 - 50 đã in
+    const cuaB = moi.filter((l) => l.printerIndex === 1).length;
+    expect(cuaB).toBeGreaterThan(moi.filter((l) => l.printerIndex === 0).length);
   });
 
   it('tắt sửa mâm đã in thì lượt đã chạy giữ nguyên số con cũ', () => {

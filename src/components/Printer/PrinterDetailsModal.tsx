@@ -4,6 +4,7 @@ import React from 'react';
 import { Clock, Info, Layers, Radio, ServerCog, Thermometer, Wifi, X } from 'lucide-react';
 import { CamMayIn } from './cam-may-in';
 import { TinhTrangMay, type TinhTrang } from './tinh-trang-may';
+import { gioDuKienXong } from '@/utils/gio-du-kien';
 
 /**
  * Bảng chi tiết một máy in.
@@ -140,7 +141,20 @@ export function PrinterDetailsModal({
                 nhan="Lớp in"
                 giaTri={`${payload?.layer_num ?? '—'} / ${payload?.total_layers ?? '—'}`}
               />
-              <O icon={<Clock size={11} />} nhan="Còn lại" giaTri={thoiGian(liveStatus.remainingTimeSeconds)} />
+              <O
+                icon={<Clock size={11} />}
+                nhan="Còn lại"
+                giaTri={
+                  <>
+                    <span className="whitespace-nowrap">{thoiGian(liveStatus.remainingTimeSeconds)}</span>
+                    {gioDuKienXong(liveStatus.remainingTimeSeconds) && (
+                      <span className="block whitespace-nowrap text-xs font-normal text-slate-400">
+                        xong {gioDuKienXong(liveStatus.remainingTimeSeconds)}
+                      </span>
+                    )}
+                  </>
+                }
+              />
             </div>
 
             {typeof payload?.wifi_signal === 'string' && (

@@ -46,7 +46,8 @@ class FilamentsNotifier extends AsyncNotifier<List<Filament>> {
 }
 
 final filamentsProvider =
-    AsyncNotifierProvider<FilamentsNotifier, List<Filament>>(FilamentsNotifier.new);
+    AsyncNotifierProvider<FilamentsNotifier, List<Filament>>(
+        FilamentsNotifier.new);
 
 /// Danh sách cuộn nhựa đã làm phẳng + bổ sung tên kho/máy in.
 ///
@@ -67,8 +68,9 @@ final spoolsProvider = Provider<AsyncValue<List<Spool>>>((ref) {
               locationName: spool.locationId == null
                   ? null
                   : locationNames[spool.locationId!],
-              printerName:
-                  spool.printerId == null ? null : printerNames[spool.printerId!],
+              printerName: spool.printerId == null
+                  ? null
+                  : printerNames[spool.printerId!],
             ))
         .toList();
   });
@@ -129,8 +131,8 @@ class PrintersNotifier extends AsyncNotifier<List<Printer>> {
   }
 }
 
-final printersProvider =
-    AsyncNotifierProvider<PrintersNotifier, List<Printer>>(PrintersNotifier.new);
+final printersProvider = AsyncNotifierProvider<PrintersNotifier, List<Printer>>(
+    PrintersNotifier.new);
 
 /// Polling trạng thái máy in cloud.
 ///
@@ -185,7 +187,8 @@ final ordersProvider =
 
 class EshopOrdersNotifier extends AsyncNotifier<List<EshopOrder>> {
   @override
-  Future<List<EshopOrder>> build() => ref.watch(eshopRepositoryProvider).fetchOrders();
+  Future<List<EshopOrder>> build() =>
+      ref.watch(eshopRepositoryProvider).fetchOrders();
 
   Future<void> refresh() async {
     state = await AsyncValue.guard(
@@ -193,7 +196,8 @@ class EshopOrdersNotifier extends AsyncNotifier<List<EshopOrder>> {
     );
   }
 
-  void updateLocalPickProgress(String orderId, String status, Map<String, int> pickedItems) {
+  void updateLocalPickProgress(
+      String orderId, String status, Map<String, int> pickedItems) {
     final current = state.valueOrNull;
     if (current == null) return;
 
@@ -219,7 +223,8 @@ class EshopOrdersNotifier extends AsyncNotifier<List<EshopOrder>> {
 }
 
 final eshopOrdersProvider =
-    AsyncNotifierProvider<EshopOrdersNotifier, List<EshopOrder>>(EshopOrdersNotifier.new);
+    AsyncNotifierProvider<EshopOrdersNotifier, List<EshopOrder>>(
+        EshopOrdersNotifier.new);
 
 class PrintItemsNotifier extends AsyncNotifier<List<PrintItem>> {
   @override
@@ -265,7 +270,8 @@ class PeiSheetsNotifier extends AsyncNotifier<List<PeiSheet>> {
 }
 
 final peiSheetsProvider =
-    AsyncNotifierProvider<PeiSheetsNotifier, List<PeiSheet>>(PeiSheetsNotifier.new);
+    AsyncNotifierProvider<PeiSheetsNotifier, List<PeiSheet>>(
+        PeiSheetsNotifier.new);
 
 /// Đơn sản xuất số lượng lớn (SLL). Backend trả kèm toàn bộ lượt in nên màn chi
 /// tiết đọc thẳng từ đây, không cần gọi lại API.
@@ -318,11 +324,31 @@ class InventorySessionNotifier extends AsyncNotifier<InventorySession> {
   }
 
   Future<ScanResult> scan(String spoolId) async {
-    final result = await ref.read(inventoryRepositoryProvider).scanSpool(spoolId);
-    // Cố gắng làm mới phiên — lỗi mạng được nuốt im, thao tác quét vẫn thành công.
-    try {
-      await refresh();
-    } catch (_) {}
+    final result =
+        await ref.read(inventoryRepositoryProvider).scanSpool(spoolId);
+
+    // Cập nhật lạc quan ngay tại máy. Luồng quét kiểm kho đi qua outbox offline,
+    // nên nếu gọi refresh() ngay thì có thể kéo phiên cũ từ server về trước khi
+    // outbox kịp đẩy lên, làm số đếm đứng im tới vòng polling kế tiếp.
+    final current = state.valueOrNull;
+    if (current != null && !current.scannedMap.containsKey(result.spoolId)) {
+      state = AsyncValue.data(
+        InventorySession(
+          id: current.id,
+          active: current.active,
+          items: [
+            InventoryItem(
+              id: 'local-${result.spoolId}-${DateTime.now().microsecondsSinceEpoch}',
+              spoolId: result.spoolId,
+              scannedAt: DateTime.now(),
+            ),
+            ...current.items,
+          ],
+        ),
+      );
+    }
+
+    unawaited(ref.read(syncProvider.notifier).dongBo());
     return result;
   }
 
@@ -370,7 +396,8 @@ class StoreNotifier extends AsyncNotifier<StoreSnapshot> {
   Future<void> refresh() async {
     _idsWithImages.clear();
     _idsWithFiles.clear();
-    state = await AsyncValue.guard(() => ref.read(storeRepositoryProvider).fetchAll());
+    state = await AsyncValue.guard(
+        () => ref.read(storeRepositoryProvider).fetchAll());
   }
 
   Future<List<StoreAttachment>> loadImages(String productId) async {
@@ -382,14 +409,16 @@ class StoreNotifier extends AsyncNotifier<StoreSnapshot> {
       return cached;
     }
 
-    final images = await ref.read(storeRepositoryProvider).fetchImages(productId);
+    final images =
+        await ref.read(storeRepositoryProvider).fetchImages(productId);
     _idsWithImages.add(productId);
     _replaceProduct(productId, (product) => product.copyWith(anh: images));
     return images;
   }
 
   Future<List<StoreAttachment>> loadPrintFiles(String productId) async {
-    final files = await ref.read(storeRepositoryProvider).fetchPrintFiles(productId);
+    final files =
+        await ref.read(storeRepositoryProvider).fetchPrintFiles(productId);
     _idsWithFiles.add(productId);
     _replaceProduct(productId, (product) => product.copyWith(tepIn: files));
     return files;

@@ -10,6 +10,13 @@ export interface DauVaoChiaLuot {
   printerIds: string[];
   /** printerId → số con mỗi mâm của riêng máy đó (tùy chọn). */
   printerLimits?: Record<string, number>;
+  /**
+   * printerId → số PHÚT in hết 1 mâm đầy trên máy đó (tùy chọn).
+   *
+   * Khai đủ cho mọi máy đã chọn thì lượt được xếp theo mốc máy rảnh, để các máy xong gần như cùng
+   * lúc; thiếu dù một máy thì quay về chia vòng tròn (xem [chiaLuotInTheoMay]).
+   */
+  printerTimes?: Record<string, number>;
 }
 
 export interface LuotInMoi {
@@ -34,7 +41,7 @@ type MayIn = { id: string; name: string };
  */
 async function layMayVaSucChua(
   dauVao: DauVaoChiaLuot
-): Promise<{ theoThuTu: MayIn[]; sucChua: number[] }> {
+): Promise<{ theoThuTu: MayIn[]; sucChua: number[]; phut: number[] }> {
   const moiMam = Math.floor(Number(dauVao.perSheetQty));
   if (!Number.isFinite(moiMam) || moiMam <= 0)
     throw new LoiChiaLuot('Số con mỗi mâm PEI phải lớn hơn 0');
@@ -52,7 +59,11 @@ async function layMayVaSucChua(
     return Number.isFinite(rieng) && rieng > 0 ? rieng : moiMam;
   });
 
-  return { theoThuTu, sucChua };
+  // Không lọc số xấu ở đây: `chiaLuotInTheoMay` chỉ xếp theo giờ khi CẢ danh sách đều hợp lệ, nên
+  // máy nào bỏ trống là cả đơn tự quay về chia vòng tròn.
+  const phut = theoThuTu.map((may) => Number(dauVao.printerTimes?.[may.id]));
+
+  return { theoThuTu, sucChua, phut };
 }
 
 /**
@@ -65,8 +76,8 @@ export async function chuanBiLuotIn(dauVao: DauVaoChiaLuot): Promise<LuotInMoi[]
   const tong = Math.floor(Number(dauVao.totalQuantity));
   if (!Number.isFinite(tong) || tong <= 0) throw new LoiChiaLuot('Tổng số con phải lớn hơn 0');
 
-  const { theoThuTu, sucChua } = await layMayVaSucChua(dauVao);
-  const luots = chiaLuotInTheoMay(tong, sucChua);
+  const { theoThuTu, sucChua, phut } = await layMayVaSucChua(dauVao);
+  const luots = chiaLuotInTheoMay(tong, sucChua, phut);
   if (luots.length === 0) throw new LoiChiaLuot('Không chia được lượt in với số liệu đã nhập');
 
   const daDung = new Set<string>();
@@ -120,13 +131,14 @@ export async function chuanBiChiaLai(
   const tong = Math.floor(Number(dauVao.totalQuantity));
   if (!Number.isFinite(tong) || tong <= 0) throw new LoiChiaLuot('Tổng số con phải lớn hơn 0');
 
-  const { theoThuTu, sucChua } = await layMayVaSucChua(dauVao);
+  const { theoThuTu, sucChua, phut } = await layMayVaSucChua(dauVao);
   const keHoach = chiaLaiGiuTienDo(
     runs,
     tong,
     theoThuTu.map((m) => m.id),
     sucChua,
-    suaLuotDaChay
+    suaLuotDaChay,
+    phut
   );
 
   if (keHoach.capNhat.length === 0 && keHoach.themMoi.length === 0 && keHoach.daKhoa < tong)

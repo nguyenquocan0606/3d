@@ -3,8 +3,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
+  Box,
   Camera,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Database,
@@ -33,6 +35,7 @@ import {
   Video,
   X,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { colorCodeFor, colorKey, findColorByCode, isColorCode, scannedColorKey } from '@/utils/color-code';
 import { CloudPrinterCard } from '@/components/Printer/CloudPrinterCard';
 import { TuongCamera } from '@/components/Printer/tuong-camera';
@@ -56,6 +59,7 @@ import MisaSettingsTab from '@/components/Settings/misa-settings-tab';
 import EshopTab from '@/components/Eshop/eshop-tab';
 import ZaloTab from '@/components/Zalo/zalo-tab';
 import ScaleCalibrationModal from '@/components/Filament/scale-calibration-modal';
+import TheNguoiDung from '@/components/Auth/the-nguoi-dung';
 import { useScale } from '@/components/scale-provider';
 import { Filament, FilamentWithSpools, Printer as PrinterType, Spool } from '@/types/filament.types';
 
@@ -76,6 +80,7 @@ type TabKey =
   | 'check-inventory'
   | 'store-products' // không còn render nội bộ — chỉ giữ làm key ổn định cho mục menu liên kết ra /hang-hoa-cua-hang
   | 'counter' // liên kết ra /counter/camera
+  | 'bao-gia' // liên kết ra /bao-gia
   | 'settings';
 
 type ApiResponse<T> = {
@@ -127,27 +132,73 @@ type ScanPopup =
   | { type: 'action'; title: string; subtitle: string; tone: 'success' | 'error' | 'info' }
   | { type: 'unknown'; title: string; subtitle: string };
 
-const navigation: Array<{ key: TabKey; label: string; icon: React.ElementType; href?: string }> = [
-  { key: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard },
-  { key: 'spools', label: 'Cuộn nhựa', icon: Database },
-  { key: 'filaments', label: 'Loại nhựa', icon: Palette },
-  { key: 'locations', label: 'Kho lưu trữ', icon: FolderOpen },
-  { key: 'printers', label: 'Máy in', icon: Printer },
-  { key: 'cameras', label: 'Camera', icon: Video },
-  { key: 'production', label: 'Sản xuất', icon: ShoppingBag },
-  { key: 'eshop', label: 'eShop', icon: ShoppingCart },
-  // Công cụ kỹ thuật, có URL riêng (/eshop-api-test) — bắn thử API Open Platform bằng App ID/App Key.
-  { key: 'eshop-api-test', label: 'eShop API test', icon: FlaskConical, href: '/eshop-api-test' },
-  { key: 'zalo', label: 'Tin nhắn Zalo', icon: MessageSquare },
-  // Có URL riêng (/hang-hoa-cua-hang) — chuyển trang thật thay vì chỉ đổi tab nội bộ.
-  { key: 'store-products', label: 'Hàng hóa cửa hàng', icon: Store, href: '/hang-hoa-cua-hang' },
-  { key: 'print-qr', label: 'In QR', icon: QrCode },
-  { key: 'print-label', label: 'In Tem', icon: Tag },
-  { key: 'create-job', label: 'Tạo job in', icon: ListOrdered },
-  { key: 'check-inventory', label: 'Kiểm kho', icon: PackageSearch },
-  { key: 'counter', label: 'Đếm sản phẩm', icon: Camera, href: '/counter/camera' },
-  { key: 'settings', label: 'Cài đặt', icon: Settings },
+type NavItem = { key: TabKey; label: string; icon: LucideIcon; href?: string };
+type NavGroup = { id: string; label: string; icon: LucideIcon; items: NavItem[] };
+
+// Mục đứng riêng trên đầu thanh bên, không thuộc nhóm nào.
+const navHome: NavItem = { key: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard };
+
+// Menu chia theo nhóm chức năng: mặc định thu gọn, chỉ bung nhóm đang dùng
+// để thanh bên không còn là danh sách phẳng gần hai chục mục.
+const navGroups: NavGroup[] = [
+  {
+    id: 'kho-nhua',
+    label: 'Kho nhựa',
+    icon: Palette,
+    items: [
+      { key: 'spools', label: 'Cuộn nhựa', icon: Database },
+      { key: 'filaments', label: 'Loại nhựa', icon: Palette },
+      { key: 'locations', label: 'Kho lưu trữ', icon: FolderOpen },
+      { key: 'check-inventory', label: 'Kiểm kho', icon: PackageSearch },
+    ],
+  },
+  {
+    id: 'may-in',
+    label: 'Máy in',
+    icon: Printer,
+    items: [
+      { key: 'printers', label: 'Danh sách máy in', icon: Printer },
+      { key: 'cameras', label: 'Camera', icon: Video },
+      { key: 'create-job', label: 'Tạo job in', icon: ListOrdered },
+    ],
+  },
+  {
+    id: 'san-xuat',
+    label: 'Sản xuất & bán hàng',
+    icon: ShoppingBag,
+    items: [
+      { key: 'production', label: 'Sản xuất', icon: ShoppingBag },
+      { key: 'eshop', label: 'eShop', icon: ShoppingCart },
+      // Có URL riêng (/hang-hoa-cua-hang) — chuyển trang thật thay vì chỉ đổi tab nội bộ.
+      { key: 'store-products', label: 'Hàng hóa cửa hàng', icon: Store, href: '/hang-hoa-cua-hang' },
+      { key: 'bao-gia', label: 'Báo giá in 3D', icon: Box, href: '/bao-gia' },
+      { key: 'counter', label: 'Đếm sản phẩm', icon: Camera, href: '/counter/camera' },
+    ],
+  },
+  {
+    id: 'in-tem',
+    label: 'In tem & mã',
+    icon: QrCode,
+    items: [
+      { key: 'print-qr', label: 'In QR', icon: QrCode },
+      { key: 'print-label', label: 'In Tem', icon: Tag },
+    ],
+  },
+  {
+    id: 'he-thong',
+    label: 'Hệ thống',
+    icon: Settings,
+    items: [
+      { key: 'zalo', label: 'Tin nhắn Zalo', icon: MessageSquare },
+      { key: 'settings', label: 'Cài đặt', icon: Settings },
+      // Công cụ kỹ thuật, có URL riêng (/eshop-api-test) — bắn thử API Open Platform bằng App ID/App Key.
+      { key: 'eshop-api-test', label: 'eShop API test', icon: FlaskConical, href: '/eshop-api-test' },
+    ],
+  },
 ];
+
+// Danh sách phẳng chỉ dùng để tra tiêu đề trang theo tab đang mở.
+const navigation: NavItem[] = [navHome, ...navGroups.flatMap((group) => group.items)];
 
 export default function Home() {
   const { weight: liveWeight, rawWeight, offset: scaleOffset, setOffset: setScaleOffset, isConnected: isScaleConnected } = useScale();
@@ -162,6 +213,9 @@ export default function Home() {
 
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  // Nhóm menu nào người dùng chủ động bung/thu. Nhóm không có trong đây thì
+  // mặc định theo tab đang mở: nhóm chứa tab hiện tại tự bung.
+  const [nhomChonTay, setNhomChonTay] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [materialFilter, setMaterialFilter] = useState('ALL');
   const [globalScannedCode, setGlobalScannedCode] = useState<{ code: string; timestamp: number } | null>(null);
@@ -656,6 +710,58 @@ export default function Home() {
     return () => window.removeEventListener('appConfirm', handleAppConfirm);
   }, [requestConfirm]);
 
+  const doiNhom = useCallback(
+    (id: string) => {
+      const nhom = navGroups.find((group) => group.id === id);
+      const macDinh = nhom ? nhom.items.some((item) => item.key === activeTab) : false;
+      setNhomChonTay((truoc) => ({ ...truoc, [id]: !(truoc[id] ?? macDinh) }));
+    },
+    [activeTab],
+  );
+
+  // Mở tab từ nơi khác (ô tắt trên Tổng quan) thì bỏ lựa chọn thu tay của nhóm chứa tab đó,
+  // để nhóm tự bung ra thay vì người dùng phải đi tìm.
+  const chonTab = useCallback((tab: TabKey) => {
+    setActiveTab(tab);
+    const nhom = navGroups.find((group) => group.items.some((item) => item.key === tab));
+    if (!nhom) return;
+    setNhomChonTay((truoc) => {
+      if (!(nhom.id in truoc)) return truoc;
+      const conLai = { ...truoc };
+      delete conLai[nhom.id];
+      return conLai;
+    });
+  }, []);
+
+  const veMucMenu = useCallback(
+    (item: NavItem) => {
+      const Icon = item.icon;
+      const active = activeTab === item.key;
+      const className = `flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+        active
+          ? 'bg-indigo-600 text-white'
+          : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800/70'
+      } ${isSidebarCollapsed ? 'justify-center' : ''}`;
+
+      if (item.href) {
+        return (
+          <Link key={item.key} href={item.href} className={className} title={item.label}>
+            <Icon size={18} />
+            {!isSidebarCollapsed && <span className="truncate">{item.label}</span>}
+          </Link>
+        );
+      }
+
+      return (
+        <button key={item.key} type="button" onClick={() => setActiveTab(item.key)} className={className} title={item.label}>
+          <Icon size={18} />
+          {!isSidebarCollapsed && <span className="truncate">{item.label}</span>}
+        </button>
+      );
+    },
+    [activeTab, isSidebarCollapsed],
+  );
+
   const title = navigation.find((item) => item.key === activeTab)?.label || 'Tổng quan';
 
   return (
@@ -705,32 +811,52 @@ export default function Home() {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-          {navigation.map((item) => {
-            const Icon = item.icon;
-            const active = activeTab === item.key;
-            const className = `flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors ${
-              active
-                ? 'bg-indigo-600 text-white'
-                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800/70'
-            } ${isSidebarCollapsed ? 'justify-center' : ''}`;
+          {veMucMenu(navHome)}
 
-            if (item.href) {
+          {navGroups.map((group) => {
+            const GroupIcon = group.icon;
+            const coTabDangMo = group.items.some((item) => item.key === activeTab);
+
+            // Thanh bên thu hẹp thì không đủ chỗ cho tên nhóm — xếp icon liền nhau, ngăn bằng đường kẻ.
+            if (isSidebarCollapsed) {
               return (
-                <Link key={item.key} href={item.href} className={className} title={item.label}>
-                  <Icon size={19} />
-                  {!isSidebarCollapsed && <span>{item.label}</span>}
-                </Link>
+                <div key={group.id} className="mt-2 space-y-1 border-t border-slate-200 pt-2 dark:border-slate-800">
+                  {group.items.map((item) => veMucMenu(item))}
+                </div>
               );
             }
 
+            const dangMo = nhomChonTay[group.id] ?? coTabDangMo;
+
             return (
-              <button key={item.key} type="button" onClick={() => setActiveTab(item.key)} className={className} title={item.label}>
-                <Icon size={19} />
-                {!isSidebarCollapsed && <span>{item.label}</span>}
-              </button>
+              <div key={group.id} className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => doiNhom(group.id)}
+                  aria-expanded={dangMo}
+                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-xs font-bold uppercase tracking-wide transition-colors hover:bg-slate-100 dark:hover:bg-slate-800/70 ${
+                    coTabDangMo ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-slate-500'
+                  }`}
+                >
+                  <GroupIcon size={16} />
+                  <span className="flex-1 truncate text-left">{group.label}</span>
+                  <ChevronDown size={14} className={`shrink-0 transition-transform ${dangMo ? '' : '-rotate-90'}`} />
+                </button>
+
+                {dangMo && (
+                  <div className="mt-1 space-y-1 border-l border-slate-200 pl-2 dark:border-slate-800">
+                    {group.items.map((item) => veMucMenu(item))}
+                  </div>
+                )}
+              </div>
             );
           })}
         </nav>
+
+        {/* Thẻ tài khoản nằm đáy thanh bên: tên người đang đăng nhập + menu đổi mật khẩu / đăng xuất. */}
+        <div className="border-t border-slate-200 p-3 dark:border-slate-800">
+          <TheNguoiDung thuGon={isSidebarCollapsed} />
+        </div>
       </aside>
 
       <section className={`transition-all duration-300 ${isSidebarCollapsed ? 'pl-20' : 'pl-72'}`}>
@@ -805,7 +931,7 @@ export default function Home() {
           ) : (
             <>
               {activeTab === 'dashboard' && (
-                <DashboardTab setActiveTab={(tab) => setActiveTab(tab as TabKey)} />
+                <DashboardTab setActiveTab={(tab) => chonTab(tab as TabKey)} />
               )}
               {activeTab === 'filaments' && (
                 <FilamentsView

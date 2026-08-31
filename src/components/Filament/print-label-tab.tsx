@@ -15,13 +15,14 @@ import {
   Type,
   X,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 // ═══════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════
 
 type TemplateKey = 'qr-text' | 'barcode-text' | 'text-only' | 'qr-large';
-type FontSizeKey = 'sm' | 'md' | 'lg';
+type FontSizeKey = 'sm' | 'md' | 'lg' | 'xl' | 'xxl';
 type SourceMode = 'custom' | 'list';
 type SourceType = 'store' | 'spool' | 'location' | 'printer';
 
@@ -64,7 +65,7 @@ interface PrintLabelTabProps {
 const LABEL_W = 320;
 const LABEL_H = 240;
 
-const TEMPLATES: Array<{ key: TemplateKey; label: string; desc: string; icon: React.ElementType }> = [
+const TEMPLATES: Array<{ key: TemplateKey; label: string; desc: string; icon: LucideIcon }> = [
   { key: 'qr-text', label: 'QR + Text', desc: 'QR trái, text phải', icon: QrCode },
   { key: 'barcode-text', label: 'Barcode + Text', desc: 'Barcode 1D giữa', icon: ScanBarcode },
   { key: 'text-only', label: 'Chỉ Text', desc: '3 dòng to, căn giữa', icon: Type },
@@ -73,15 +74,22 @@ const TEMPLATES: Array<{ key: TemplateKey; label: string; desc: string; icon: Re
 
 /** Font size (px) trên canvas 320×240. Tương ứng kích thước thật trên tem. */
 const CANVAS_FONT_PX: Record<FontSizeKey, number> = {
-  sm: 14,  // ~1.7mm
-  md: 20,  // ~2.5mm
-  lg: 28,  // ~3.5mm
+  sm: 14,   // ~1.7mm
+  md: 20,   // ~2.5mm
+  lg: 28,   // ~3.5mm
+  xl: 160,  // ~14mm chữ thật — chỉ hợp với template "Chỉ Text"
+  xxl: 320, // tự co lại cho vừa tem → chữ cao ~28mm
 };
+
+/** Template có QR/barcode: chữ to quá sẽ phá layout → chặn trần. */
+const MAX_FONT_PX_WITH_CODE = 40;
 
 const FONT_SIZES: Array<{ key: FontSizeKey; label: string; desc: string }> = [
   { key: 'sm', label: 'Nhỏ', desc: '~1.7mm' },
   { key: 'md', label: 'Vừa', desc: '~2.5mm' },
   { key: 'lg', label: 'Lớn', desc: '~3.5mm' },
+  { key: 'xl', label: 'Rất lớn', desc: '~14mm' },
+  { key: 'xxl', label: 'Khổng lồ', desc: 'lấp đầy tem' },
 ];
 
 const SOURCE_TYPES: Array<{ key: SourceType; label: string }> = [
@@ -329,20 +337,47 @@ function renderTextOnly(
   const lines = [l1, l2, l3].filter(Boolean);
   if (lines.length === 0) return;
 
-  const lineH = fs + 10;
-  const totalH = lines.length * lineH;
-  const startY = Math.max(8, Math.floor((LABEL_H - totalH) / 2));
+  const PAD_X = 10;
+  const PAD_Y = 8;
+  const GAP = 8;
+  const maxW = LABEL_W - PAD_X * 2;
+  const maxH = LABEL_H - PAD_Y * 2;
+
+  const fontOf = (i: number, size: number) => `${i === 0 ? 'bold' : '500'} ${size}px ${FONT_FAMILY}`;
+
+  // Đo theo hộp bao thật của chữ (không phải em-box) → chữ lấp đầy tem chứ không hụt
+  const measure = (size: number) =>
+    lines.map((text, i) => {
+      ctx.font = fontOf(i, size);
+      const m = ctx.measureText(text);
+      const asc = m.actualBoundingBoxAscent || size * 0.75;
+      const desc = m.actualBoundingBoxDescent || size * 0.25;
+      return { w: m.width, asc, desc, h: asc + desc };
+    });
+
+  // Chọn cỡ lớn nhất vẫn vừa tem, tối đa bằng cỡ người dùng chọn
+  let size = Math.max(8, Math.round(fs));
+  let boxes = measure(size);
+  const totalH = (b: typeof boxes) => b.reduce((s, x) => s + x.h, 0) + GAP * (b.length - 1);
+  const widest = (b: typeof boxes) => Math.max(...b.map((x) => x.w));
+  while (size > 8 && (totalH(boxes) > maxH || widest(boxes) > maxW)) {
+    size -= 2;
+    boxes = measure(size);
+  }
 
   ctx.fillStyle = '#000';
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
+  ctx.textBaseline = 'alphabetic';
 
+  let y = Math.max(PAD_Y, Math.floor((LABEL_H - totalH(boxes)) / 2));
   lines.forEach((text, i) => {
-    ctx.font = `${i === 0 ? 'bold' : '500'} ${fs}px ${FONT_FAMILY}`;
-    ctx.fillText(text, LABEL_W / 2, startY + i * lineH, LABEL_W - 16);
+    ctx.font = fontOf(i, size);
+    ctx.fillText(text, LABEL_W / 2, y + boxes[i].asc, maxW);
+    y += boxes[i].h + GAP;
   });
 
   ctx.textAlign = 'start';
+  ctx.textBaseline = 'top';
 }
 
 async function renderQrLarge(
@@ -398,7 +433,9 @@ function LabelPreview({
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, LABEL_W, LABEL_H);
 
-      const fs = CANVAS_FONT_PX[fontSize];
+      const fs = template === 'text-only'
+        ? CANVAS_FONT_PX[fontSize]
+        : Math.min(CANVAS_FONT_PX[fontSize], MAX_FONT_PX_WITH_CODE);
       const qr = qrContent || line1;
 
       switch (template) {
@@ -803,7 +840,7 @@ export default function PrintLabelTab({ allSpools, locations, printers }: PrintL
           <div className="flex flex-col sm:flex-row gap-6">
             <div className="flex-1">
               <h4 className="mb-3 text-sm font-bold">Cỡ chữ</h4>
-              <div className="flex gap-2">
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                 {FONT_SIZES.map((f) => (
                   <button
                     key={f.key}
@@ -820,6 +857,11 @@ export default function PrintLabelTab({ allSpools, locations, printers }: PrintL
                   </button>
                 ))}
               </div>
+              {template !== 'text-only' && CANVAS_FONT_PX[fontSize] > MAX_FONT_PX_WITH_CODE && (
+                <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
+                  Cỡ này chỉ dùng được với kiểu “Chỉ Text” — kiểu có QR/barcode sẽ tự giảm về ~5mm.
+                </p>
+              )}
             </div>
 
             <div className="w-full sm:w-44">

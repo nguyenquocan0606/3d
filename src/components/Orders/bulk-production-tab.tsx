@@ -19,6 +19,9 @@ import {
 import {
   chiaLuotInTheoMay,
   chiaLaiGiuTienDo,
+  taiTheoMay,
+  phutHopLe,
+  dinhDangPhut,
   dinhDangThoiLuong,
   canBuBaoNhieu,
   tongSoLoi,
@@ -85,21 +88,60 @@ const sucChuaTheoMay = (
     return Number.isFinite(rieng) && rieng > 0 ? Math.floor(rieng) : moiMamChung;
   });
 
-/** Chọn máy + khai số con/mâm riêng cho máy đó. Dùng chung cho form tạo và form chia lại. */
+/**
+ * Số phút in 1 mâm đầy của từng máy theo đúng thứ tự chọn.
+ *
+ * Ô nhập là GIỜ (in 3D tính bằng tiếng, gõ phút thì dài dòng) nhưng phần chia tính bằng phút.
+ * Máy bỏ trống ra 0 — `chiaLuotInTheoMay` thấy có số không hợp lệ là tự quay về chia vòng tròn,
+ * nên không cần lọc ở đây.
+ */
+const phutTheoMay = (ids: string[], times: Record<string, string>): number[] =>
+  ids.map((id) => Number(times[id]) * 60);
+
+/**
+ * Đoán giờ/mâm của một máy từ chính các lượt nó đã in xong.
+ *
+ * Dùng lúc chia lại: giờ/mâm không được lưu ở DB, nhưng mốc quẹt "bắt đầu in" / "in xong" thì có.
+ * Chỉ lấy **mâm đầy** (mâm lẻ cuối in nhanh hơn nên đem trung bình vào sẽ kéo tụt con số) và bỏ
+ * lượt kéo dài quá 3 ngày — đó là lượt quên quẹt xong chứ không phải in thật lâu vậy.
+ */
+const gioMoiMamDaDo = (runs: BulkRun[], printerId: string, sucChua: number): string => {
+  const phut = runs
+    .filter(
+      (r) =>
+        r.printerId === printerId &&
+        r.status === 'completed' &&
+        r.quantity === sucChua &&
+        r.startedAt &&
+        r.finishedAt
+    )
+    .map((r) => (new Date(r.finishedAt!).getTime() - new Date(r.startedAt!).getTime()) / 60000)
+    .filter((n) => n > 0 && n < 3 * 24 * 60);
+  if (phut.length === 0) return '';
+  const trungBinh = phut.reduce((a, b) => a + b, 0) / phut.length;
+  return (Math.round((trungBinh / 60) * 10) / 10).toString();
+};
+
+/** Chọn máy + khai số con/mâm và giờ/mâm riêng cho máy đó. Dùng chung cho form tạo và form chia lại. */
 function MayPicker({
   printers,
   selectedIds,
   limits,
+  times,
   moiMamChung,
   onToggle,
   onLimit,
+  onTime,
 }: {
   printers: Printer[];
   selectedIds: string[];
   limits: Record<string, string>;
+  /** printerId → số GIỜ in 1 mâm đầy trên máy đó (chuỗi thô của ô nhập). */
+  times: Record<string, string>;
   moiMamChung: string;
   onToggle: (id: string) => void;
   onLimit: (id: string, value: string) => void;
+  onTime: (id: string, value: string) => void;
 }) {
   if (printers.length === 0) {
     return <div className="text-xs text-slate-500 py-3">Chưa có máy in nào trong hệ thống</div>;
@@ -143,9 +185,20 @@ function MayPicker({
                   onChange={(e) => onLimit(p.id, e.target.value)}
                   placeholder={moiMamChung || '—'}
                   title="Số con mỗi mâm PEI của riêng máy này (bỏ trống = dùng số chung)"
-                  className="w-16 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-white"
+                  className="w-14 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-white"
                 />
-                <span className="text-[10px] text-slate-500">con/mâm</span>
+                <span className="text-[10px] text-slate-500">con</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={times[p.id] ?? ''}
+                  onChange={(e) => onTime(p.id, e.target.value)}
+                  placeholder="—"
+                  title="Số giờ in hết 1 mâm đầy trên máy này. Khai đủ cho MỌI máy thì hệ thống chia lượt sao cho các máy xong cùng lúc."
+                  className="w-14 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-white"
+                />
+                <span className="text-[10px] text-slate-500">giờ</span>
               </div>
             )}
           </div>
@@ -177,6 +230,8 @@ export default function BulkProductionTab() {
   const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
   // printerId → số con mỗi mâm của riêng máy đó; bỏ trống là dùng số chung của đơn.
   const [printerLimits, setPrinterLimits] = useState<Record<string, string>>({});
+  // printerId → số giờ in 1 mâm đầy trên máy đó; khai đủ cả danh sách mới cân được giờ kết thúc.
+  const [printerTimes, setPrinterTimes] = useState<Record<string, string>>({});
   const [creating, setCreating] = useState(false);
 
   // Sửa đơn: chỉ phần thông tin, KHÔNG đụng tới số lượng / máy in vì lượt đã chia
@@ -196,6 +251,7 @@ export default function BulkProductionTab() {
   const [editSplit, setEditSplit] = useState({ totalQuantity: '', perSheetQty: '' });
   const [editPrinterIds, setEditPrinterIds] = useState<string[]>([]);
   const [editLimits, setEditLimits] = useState<Record<string, string>>({});
+  const [editTimes, setEditTimes] = useState<Record<string, string>>({});
   // Đổi số con/mâm phần lớn là do khai nhầm (34 mà thật ra 35), nên mặc định sửa
   // luôn số con của những mâm ĐẦY đã in — nếu không tổng số con của đơn đếm sai.
   const [suaLuotDaChay, setSuaLuotDaChay] = useState(true);
@@ -344,15 +400,29 @@ export default function BulkProductionTab() {
     const tong = Number(form.totalQuantity);
     const moiMam = Number(form.perSheetQty);
     if (!tong || !moiMam || selectedPrinterIds.length === 0) return null;
-    const luots = chiaLuotInTheoMay(tong, sucChuaTheoMay(selectedPrinterIds, printerLimits, moiMam));
+    const sucChua = sucChuaTheoMay(selectedPrinterIds, printerLimits, moiMam);
+    const phut = phutTheoMay(selectedPrinterIds, printerTimes);
+    const luots = chiaLuotInTheoMay(tong, sucChua, phut);
     if (luots.length === 0) return null;
+    const tai = taiTheoMay(luots, sucChua, phut);
     const theoMay = selectedPrinterIds.map((id, idx) => ({
       ten: printers.find((p) => p.id === id)?.name ?? id,
-      soLuot: luots.filter((l) => l.printerIndex === idx).length,
-      moiMam: sucChuaTheoMay(selectedPrinterIds, printerLimits, moiMam)[idx],
+      soLuot: tai[idx].soLuot,
+      moiMam: sucChua[idx],
+      phut: tai[idx].phut,
     }));
-    return { soLuot: luots.length, theoMay, duCuoi: luots[luots.length - 1].quantity };
-  }, [form.totalQuantity, form.perSheetQty, selectedPrinterIds, printerLimits, printers]);
+    // Chỉ nói chuyện giờ giấc khi MỌI máy đều khai — thiếu một máy là con số tổng vô nghĩa.
+    const canGio = phutHopLe(phut, selectedPrinterIds.length) !== null;
+    const moc = theoMay.map((m) => m.phut ?? 0).filter((_, i) => theoMay[i].soLuot > 0);
+    return {
+      soLuot: luots.length,
+      theoMay,
+      duCuoi: luots[luots.length - 1].quantity,
+      canGio,
+      xongSom: canGio && moc.length > 0 ? Math.min(...moc) : null,
+      xongMuon: canGio && moc.length > 0 ? Math.max(...moc) : null,
+    };
+  }, [form.totalQuantity, form.perSheetQty, selectedPrinterIds, printerLimits, printerTimes, printers]);
 
   // Xem trước kết quả chia lại — dùng đúng hàm backend dùng, nên con số hiện ở đây
   // khớp với những gì thật sự được ghi xuống.
@@ -362,8 +432,17 @@ export default function BulkProductionTab() {
     const moiMam = Number(editSplit.perSheetQty);
     if (!tong || !moiMam || editPrinterIds.length === 0) return null;
     const sucChua = sucChuaTheoMay(editPrinterIds, editLimits, moiMam);
-    const keHoach = chiaLaiGiuTienDo(editing.runs, tong, editPrinterIds, sucChua, suaLuotDaChay);
+    const phut = phutTheoMay(editPrinterIds, editTimes);
+    const keHoach = chiaLaiGiuTienDo(
+      editing.runs,
+      tong,
+      editPrinterIds,
+      sucChua,
+      suaLuotDaChay,
+      phut
+    );
     const moi = [...keHoach.capNhat, ...keHoach.themMoi];
+    const canGio = phutHopLe(phut, editPrinterIds.length) !== null;
     return {
       soLuot: keHoach.giuNguyen.length + moi.length,
       giuNguyen: keHoach.giuNguyen.length,
@@ -372,13 +451,21 @@ export default function BulkProductionTab() {
       suaDaChay: keHoach.suaDaChay,
       themMoi: keHoach.themMoi.length,
       xoa: keHoach.xoa.length,
-      theoMay: editPrinterIds.map((id, idx) => ({
-        ten: printers.find((p) => p.id === id)?.name ?? id,
-        soLuot: moi.filter((l) => l.printerIndex === idx).length,
-        moiMam: sucChua[idx],
-      })),
+      canGio,
+      theoMay: editPrinterIds.map((id, idx) => {
+        const cuaMay = moi.filter((l) => l.printerIndex === idx);
+        return {
+          ten: printers.find((p) => p.id === id)?.name ?? id,
+          soLuot: cuaMay.length,
+          moiMam: sucChua[idx],
+          // Chỉ tính phần CÒN PHẢI CHẠY: mâm đã in xong rồi thì không ai chờ nó nữa.
+          phut: canGio
+            ? cuaMay.reduce((t, l) => t + (phut[idx] * l.quantity) / sucChua[idx], 0)
+            : null,
+        };
+      }),
     };
-  }, [editing, editSplit, editPrinterIds, editLimits, suaLuotDaChay, printers]);
+  }, [editing, editSplit, editPrinterIds, editLimits, editTimes, suaLuotDaChay, printers]);
 
   const toggleMay = (id: string) => {
     setSelectedPrinterIds((cu) => (cu.includes(id) ? cu.filter((x) => x !== id) : [...cu, id]));
@@ -405,6 +492,13 @@ export default function BulkProductionTab() {
               .filter((id) => Number(printerLimits[id]) > 0)
               .map((id) => [id, Number(printerLimits[id])])
           ),
+          // Gửi bằng PHÚT cho khớp đơn vị của phần chia; máy bỏ trống thì không gửi, và backend
+          // thấy thiếu là tự chia vòng tròn như cũ.
+          printerTimes: Object.fromEntries(
+            selectedPrinterIds
+              .filter((id) => Number(printerTimes[id]) > 0)
+              .map((id) => [id, Number(printerTimes[id]) * 60])
+          ),
         }),
       });
       const data = await res.json();
@@ -413,6 +507,7 @@ export default function BulkProductionTab() {
         setForm({ orderCode: '', customerName: '', productName: '', totalQuantity: '', perSheetQty: '', note: '' });
         setSelectedPrinterIds([]);
         setPrinterLimits({});
+        setPrinterTimes({});
         setShowForm(false);
         await fetchData();
         setSelectedOrderId(data.data.id);
@@ -448,6 +543,13 @@ export default function BulkProductionTab() {
     }
     setEditPrinterIds(thuTu);
     setEditLimits(sucChua);
+    // Giờ/mâm không nằm trong DB, nhưng mốc quẹt của những mâm đã in xong nói lên điều đó —
+    // điền sẵn số ĐO ĐƯỢC để chia lại không phải bấm giờ lại từ đầu.
+    setEditTimes(
+      Object.fromEntries(
+        thuTu.map((id) => [id, gioMoiMamDaDo(order.runs, id, Number(sucChua[id] || 0))])
+      )
+    );
     setSuaLuotDaChay(true);
 
     setEditForm({
@@ -501,7 +603,8 @@ export default function BulkProductionTab() {
       tong,
       editPrinterIds,
       sucChuaTheoMay(editPrinterIds, editLimits, moiMam),
-      suaLuotDaChay
+      suaLuotDaChay,
+      phutTheoMay(editPrinterIds, editTimes)
     );
     window.dispatchEvent(
       new CustomEvent('appConfirm', {
@@ -533,6 +636,11 @@ export default function BulkProductionTab() {
                     editPrinterIds
                       .filter((id) => Number(editLimits[id]) > 0)
                       .map((id) => [id, Number(editLimits[id])])
+                  ),
+                  printerTimes: Object.fromEntries(
+                    editPrinterIds
+                      .filter((id) => Number(editTimes[id]) > 0)
+                      .map((id) => [id, Number(editTimes[id]) * 60])
                   ),
                   suaLuotDaChay,
                 }),
@@ -829,16 +937,20 @@ export default function BulkProductionTab() {
 
           <div>
             <label className="block text-xs text-slate-500 dark:text-slate-400 mb-2">
-              Chọn máy in chạy đơn này * (số thứ tự = thứ tự nhận lượt · ô bên phải là số
-              con/mâm riêng của máy đó, bỏ trống thì dùng số chung ở trên)
+              Chọn máy in chạy đơn này * (số thứ tự = thứ tự nhận lượt · ô <b>con</b> là số con/mâm
+              riêng của máy đó, bỏ trống thì dùng số chung ở trên · ô <b>giờ</b> là thời gian in
+              hết 1 mâm đầy trên máy đó — khai đủ cho mọi máy thì hệ thống chia sao cho các máy
+              xong cùng lúc, thay vì chia đều số mâm)
             </label>
             <MayPicker
               printers={printers}
               selectedIds={selectedPrinterIds}
               limits={printerLimits}
+              times={printerTimes}
               moiMamChung={form.perSheetQty}
               onToggle={toggleMay}
               onLimit={(id, value) => setPrinterLimits((cu) => ({ ...cu, [id]: value }))}
+              onTime={(id, value) => setPrinterTimes((cu) => ({ ...cu, [id]: value }))}
             />
           </div>
 
@@ -848,11 +960,30 @@ export default function BulkProductionTab() {
               <span className="font-bold text-indigo-600 dark:text-indigo-300">{previewLuots.soLuot} lượt in</span> trên{' '}
               {selectedPrinterIds.length} máy —{' '}
               {previewLuots.theoMay
-                .map((m) => `${m.ten}: ${m.soLuot} lượt × ${m.moiMam} con`)
+                .map(
+                  (m) =>
+                    `${m.ten}: ${m.soLuot} lượt × ${m.moiMam} con` +
+                    (m.phut != null ? ` ≈ ${dinhDangPhut(m.phut)}` : '')
+                )
                 .join(' · ')}
               {previewLuots.duCuoi !== Number(form.perSheetQty) && (
                 <span className="text-amber-500"> (lượt cuối chỉ {previewLuots.duCuoi} con)</span>
               )}
+              <div className="mt-1 text-xs">
+                {previewLuots.canGio && previewLuots.xongSom != null && previewLuots.xongMuon != null ? (
+                  <span className="text-emerald-600 dark:text-emerald-400">
+                    Chạy liên tục thì các máy xong trong khoảng {dinhDangPhut(previewLuots.xongSom)} –{' '}
+                    {dinhDangPhut(previewLuots.xongMuon)} (lệch nhau{' '}
+                    {dinhDangPhut(previewLuots.xongMuon - previewLuots.xongSom)}).
+                  </span>
+                ) : (
+                  <span className="text-slate-500 dark:text-slate-400">
+                    Đang chia đều số mâm cho mỗi máy. Điền ô <b>giờ</b> cho đủ cả{' '}
+                    {selectedPrinterIds.length} máy để hệ thống chia theo tốc độ, cho các máy xong
+                    cùng lúc.
+                  </span>
+                )}
+              </div>
             </div>
           )}
 
@@ -978,13 +1109,16 @@ export default function BulkProductionTab() {
 
                 <div>
                   <label className="block text-xs text-slate-500 dark:text-slate-400 mb-2">
-                    Máy in chạy đơn (số thứ tự = thứ tự nhận lượt · ô bên phải là số con/mâm
-                    riêng của máy đó)
+                    Máy in chạy đơn (số thứ tự = thứ tự nhận lượt · ô <b>con</b> là số con/mâm
+                    riêng của máy đó · ô <b>giờ</b> là thời gian in 1 mâm đầy, điền sẵn theo số đo
+                    được từ những mâm đã in xong — khai đủ cho mọi máy thì phần còn lại được chia
+                    sao cho các máy xong cùng lúc)
                   </label>
                   <MayPicker
                     printers={printers}
                     selectedIds={editPrinterIds}
                     limits={editLimits}
+                    times={editTimes}
                     moiMamChung={editSplit.perSheetQty}
                     onToggle={(id) =>
                       setEditPrinterIds((cu) =>
@@ -992,6 +1126,7 @@ export default function BulkProductionTab() {
                       )
                     }
                     onLimit={(id, value) => setEditLimits((cu) => ({ ...cu, [id]: value }))}
+                    onTime={(id, value) => setEditTimes((cu) => ({ ...cu, [id]: value }))}
                   />
                 </div>
 
@@ -1034,7 +1169,11 @@ export default function BulkProductionTab() {
                     <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                       Phần chia lại:{' '}
                       {previewChiaLai.theoMay
-                        .map((m) => `${m.ten}: ${m.soLuot} lượt × ${m.moiMam} con`)
+                        .map(
+                          (m) =>
+                            `${m.ten}: ${m.soLuot} lượt × ${m.moiMam} con` +
+                            (m.phut != null ? ` ≈ còn ${dinhDangPhut(m.phut)}` : '')
+                        )
                         .join(' · ')}
                     </div>
                   </div>

@@ -2,6 +2,7 @@ import prisma from '@/utils/db';
 import { printerManager } from './printer-integration/PrinterManager';
 import type { PrinterStatusData } from './printer-integration/types';
 import { ghiVaGuiSuKien, type LoaiSuKien } from './thong-bao.service';
+import { dongHmsDeBao, type LoiHms } from './printer-integration/providers/bambu/ma-loi';
 import { ngoLop } from './anh-theo-lop';
 
 /**
@@ -81,9 +82,26 @@ function trangThaiTho(st: PrinterStatusData): string {
  *
  * Provider đã lọc sẵn: chỉ lý do dừng và mã lỗi bản in mới vào đây, còn lỗi HMS thì không —
  * chúng dai dẳng và phần lớn không cản việc in, réo lên chỉ tổ làm người ta tắt thông báo.
+ * (Riêng tin Zalo được đính thêm khối HMS qua `chiTietHms()`, chỉ là HMS không tự sinh ra tin.)
  */
 function loiMoTa(st: PrinterStatusData): string {
   return st.errorMessage || 'Máy báo lỗi, không rõ nguyên nhân.';
+}
+
+/**
+ * Khối HMS đính thêm vào **riêng tin Zalo** — giống hệt phần web đang hiện.
+ *
+ * Máy dừng thường kéo theo vài mã HMS nói rõ hỏng chỗ nào; thiếu chúng thì tin Zalo chỉ nói được
+ * "tắc đầu phun" mà không đưa nổi mã để thợ tra wiki. Trả chuỗi rỗng khi máy không báo mã nào.
+ *
+ * Chỉ Zalo: Discord đã có bảng số liệu riêng và web hiện sẵn mảng `hms`, còn thông báo đẩy trên
+ * app thì chỉ đủ chỗ cho một dòng. Zalo mới là kênh người ta đọc lúc đang trên đường ra máy.
+ */
+function chiTietHms(st: PrinterStatusData): string {
+  const tho = st.extendedInfo?.payload?.hms;
+  const hms: LoiHms[] = Array.isArray(tho) ? tho : [];
+  const dong = dongHmsDeBao(hms);
+  return dong.length > 0 ? `\nMáy báo ${hms.length} lỗi:\n${dong.join('\n')}` : '';
 }
 
 /** Lý do máy dừng, do provider giải mã sẵn từ chặng đang chạy. */
@@ -140,6 +158,8 @@ async function ban(
   tieuDe: string,
   noiDung: string,
   st: PrinterStatusData,
+  /** Phần chỉ Zalo nhận thêm (hiện là khối mã HMS). */
+  kemZalo?: string,
 ) {
   bo.lanCuoi[loai] = Date.now();
   await ghiVaGuiSuKien({
@@ -148,6 +168,7 @@ async function ban(
     loai,
     tieuDe,
     noiDung,
+    kemZalo: kemZalo || undefined,
     tienDo: Math.round(st.progress || 0),
     tenFile: st.fileName || null,
     nhietVoi: st.nozzleTemp ?? null,
@@ -270,14 +291,15 @@ async function quetMotMay(printer: {
       // chỉ kịp liếc dòng đầu.
       await ban(bo, printer.id, printer.name, 'loi',
         lyDo ? `${printer.name} dừng vì ${lyDo}` : `${printer.name} báo lỗi`,
-        `${loiMoTa(hienTai)}\n${moTaFile(tenFile)} · ${phanTramNhietVaTienDo(hienTai)}`, hienTai);
+        `${loiMoTa(hienTai)}\n${moTaFile(tenFile)} · ${phanTramNhietVaTienDo(hienTai)}`,
+        hienTai, chiTietHms(hienTai));
     } else if (gon === 'tamDung') {
       const { lyDo } = lyDoDung(hienTai);
       await ban(bo, printer.id, printer.name, 'tamDung', `${printer.name} đang tạm dừng`,
         lyDo
           ? `${moTaFile(tenFile)} · dừng ở ${tienDo}% (${lyDo}).`
           : `${moTaFile(tenFile)} · dừng ở ${tienDo}%. Nếu không phải do người bấm dừng thì kiểm tra ngay.`,
-        hienTai);
+        hienTai, chiTietHms(hienTai));
     } else if (gon === 'in') {
       if (truoc === 'tamDung') {
         await ban(bo, printer.id, printer.name, 'inTiep', `${printer.name} in tiếp`,

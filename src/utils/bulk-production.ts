@@ -2,8 +2,10 @@
  * Logic chia lượt in cho chế độ sản xuất số lượng lớn.
  *
  * Đơn vị sản xuất ở đây là 1 LƯỢT = 1 mâm PEI đầy hàng. Biết tổng số con và số con xếp vừa 1 mâm
- * là ra số lượt; chia vòng tròn (round-robin) cho các máy được chọn để không máy nào phải chờ máy
- * khác xong mới có việc.
+ * là ra số lượt; chia cho các máy được chọn để không máy nào phải chờ máy khác xong mới có việc.
+ *
+ * Hai kiểu chia, xem [chiaLuotInTheoMay]: chưa khai thời gian in thì chia vòng tròn (round-robin),
+ * khai đủ giờ/mâm cho mọi máy thì xếp theo mốc máy rảnh để cả xưởng xong gần như cùng lúc.
  */
 
 export interface LuotInDuKien {
@@ -14,16 +16,40 @@ export interface LuotInDuKien {
 }
 
 /**
+ * Thời gian in 1 mâm ĐẦY của từng máy, tính bằng phút — chỉ hợp lệ khi mọi máy đều khai một số
+ * dương. Thiếu dù một máy thì trả `null`: đoán bừa giờ của máy chưa khai sẽ chia lệch mà người
+ * dùng không hề biết, thà quay về chia vòng tròn như cũ.
+ */
+export function phutHopLe(phutMoiMay: number[] | undefined | null, soMay: number): number[] | null {
+  if (!Array.isArray(phutMoiMay) || phutMoiMay.length !== soMay) return null;
+  const phut = phutMoiMay.map((n) => Number(n));
+  return phut.every((n) => Number.isFinite(n) && n > 0) ? phut : null;
+}
+
+/**
  * Chia đơn thành danh sách lượt in, mỗi máy có sức chứa mâm riêng.
  *
  * `sucChuaMoiMay[i]` = số con xếp vừa 1 mâm PEI **của máy thứ i**. Máy khổ bàn khác
  * nhau thì xếp được số con khác nhau, nên không ép chung một con số; máy nào không
  * khai riêng thì phía gọi truyền sẵn số chung vào đây.
  *
- * Vẫn chia vòng tròn: máy 1 → máy 2 → ... → quay lại máy 1, cho tới khi đủ tổng.
- * Lượt cuối nhận phần dư (VD tổng 250, mâm 60 → 4 mâm đầy + 1 mâm 10 con).
+ * Có hai kiểu chia, tùy vào việc có khai thời gian in hay không:
+ *
+ * - **Không khai giờ** → chia vòng tròn: máy 1 → máy 2 → ... → quay lại máy 1. Mọi máy nhận số
+ *   mâm xấp xỉ bằng nhau.
+ * - **Khai đủ giờ cho mọi máy** (`phutMoiMam[i]` = phút in 1 mâm đầy của máy đó) → mỗi mâm được
+ *   giao cho **máy rảnh sớm nhất**. Mâm 61 con in lâu hơn hẳn mâm 35 con, chia đều số mâm thì máy
+ *   nhanh ngồi chơi còn máy chậm chạy tiếp mấy tiếng; xếp theo mốc rảnh thì máy nhanh nhận nhiều
+ *   mâm hơn và cả xưởng xong gần như cùng lúc.
+ *
+ * Lượt cuối nhận phần dư (VD tổng 250, mâm 60 → 4 mâm đầy + 1 mâm 10 con) và chỉ chiếm thời gian
+ * theo tỉ lệ số con — mâm 10/60 con không giữ máy lâu bằng mâm đầy.
  */
-export function chiaLuotInTheoMay(tongSoCon: number, sucChuaMoiMay: number[]): LuotInDuKien[] {
+export function chiaLuotInTheoMay(
+  tongSoCon: number,
+  sucChuaMoiMay: number[],
+  phutMoiMam?: number[] | null
+): LuotInDuKien[] {
   if (!Number.isFinite(tongSoCon) || tongSoCon <= 0) return [];
   if (sucChuaMoiMay.length === 0) return [];
 
@@ -32,14 +58,24 @@ export function chiaLuotInTheoMay(tongSoCon: number, sucChuaMoiMay: number[]): L
   // Máy khai sức chứa <= 0 sẽ làm vòng lặp chạy mãi mà không xếp được con nào.
   if (sucChua.some((n) => !Number.isFinite(n) || n <= 0)) return [];
 
+  const phut = phutHopLe(phutMoiMam, sucChua.length);
+
   const luots: LuotInDuKien[] = [];
   const soMamDaXep = new Array(sucChua.length).fill(0);
+  /** Mốc máy rảnh trở lại, tính bằng phút kể từ lúc bấm chạy. */
+  const ranhLuc = new Array(sucChua.length).fill(0);
   let daXep = 0;
   let luotThu = 0;
 
   while (daXep < tong) {
-    const may = luotThu % sucChua.length;
+    let may = luotThu % sucChua.length;
+    if (phut) {
+      // Máy nào rảnh sớm nhất thì nhận mâm tiếp theo. Hòa thì máy đứng trước trong danh sách được
+      // ưu tiên, nên vòng đầu vẫn đi đúng thứ tự người dùng bấm chọn.
+      may = ranhLuc.reduce((tot, moc, i) => (moc < ranhLuc[tot] ? i : tot), 0);
+    }
     const quantity = Math.min(sucChua[may], tong - daXep);
+    if (phut) ranhLuc[may] += (phut[may] * quantity) / sucChua[may];
     soMamDaXep[may] += 1;
     luots.push({
       seq: luots.length + 1,
@@ -52,6 +88,38 @@ export function chiaLuotInTheoMay(tongSoCon: number, sucChuaMoiMay: number[]): L
   }
 
   return luots;
+}
+
+/** Khối lượng việc rơi vào một máy sau khi chia. */
+export interface TaiMay {
+  printerIndex: number;
+  soLuot: number;
+  soCon: number;
+  /** Tổng thời gian in dự kiến (phút), hoặc null khi chưa khai giờ. */
+  phut: number | null;
+}
+
+/**
+ * Tổng kết mỗi máy phải chạy bao nhiêu mâm / bao nhiêu con / mất bao lâu.
+ *
+ * Dùng cho phần xem trước: người dùng cần thấy ngay là bốn máy có xong cùng lúc thật không, chứ
+ * nhìn "4 lượt × 35 con" thì không biết được.
+ */
+export function taiTheoMay(
+  luots: LuotInDuKien[],
+  sucChuaMoiMay: number[],
+  phutMoiMam?: number[] | null
+): TaiMay[] {
+  const phut = phutHopLe(phutMoiMam, sucChuaMoiMay.length);
+  return sucChuaMoiMay.map((sucChua, i) => {
+    const cuaMay = luots.filter((l) => l.printerIndex === i);
+    return {
+      printerIndex: i,
+      soLuot: cuaMay.length,
+      soCon: cuaMay.reduce((s, l) => s + l.quantity, 0),
+      phut: phut ? cuaMay.reduce((s, l) => s + (phut[i] * l.quantity) / sucChua, 0) : null,
+    };
+  });
 }
 
 /**
@@ -131,7 +199,9 @@ export function chiaLaiGiuTienDo(
   tongMoi: number,
   printerIds: string[],
   sucChuaMoiMay: number[],
-  suaLuotDaChay = true
+  suaLuotDaChay = true,
+  /** Phút in 1 mâm đầy của từng máy — khai đủ thì phần còn lại được chia sao cho các máy xong cùng lúc. */
+  phutMoiMam?: number[] | null
 ): KeHoachChiaLai {
   const khoa = runs.filter((r) => r.isRework || r.status !== 'pending');
   const thayDuoc = runs
@@ -182,7 +252,7 @@ export function chiaLaiGiuTienDo(
     peiMax.set(run.printerId, Math.max(peiMax.get(run.printerId) ?? 0, run.peiIndex));
   }
 
-  const luots = chiaLuotInTheoMay(conLai, sucChuaMoiMay);
+  const luots = chiaLuotInTheoMay(conLai, sucChuaMoiMay, phutMoiMam);
   const canhLai = luots.map((luot) => ({
     printerIndex: luot.printerIndex,
     seq: seqMax + luot.seq,
@@ -213,6 +283,16 @@ export function trangThaiDon(runStatuses: string[]): 'pending' | 'printing' | 'c
   return 'pending';
 }
 
+/** Số phút ra chuỗi ngắn kiểu "2g 15p" / "45p". */
+export function dinhDangPhut(soPhut: number): string {
+  if (!Number.isFinite(soPhut) || soPhut < 0) return '—';
+  const tongPhut = Math.round(soPhut);
+  const gio = Math.floor(tongPhut / 60);
+  const phut = tongPhut % 60;
+  if (gio === 0) return `${phut}p`;
+  return `${gio}g ${phut}p`;
+}
+
 /** Định dạng thời lượng in ra chuỗi ngắn kiểu "2g 15p" / "45p" để hiện trong bảng. */
 export function dinhDangThoiLuong(startedAt?: Date | string | null, finishedAt?: Date | string | null): string {
   if (!startedAt || !finishedAt) return '—';
@@ -220,11 +300,7 @@ export function dinhDangThoiLuong(startedAt?: Date | string | null, finishedAt?:
   const ketThuc = new Date(finishedAt).getTime();
   if (!Number.isFinite(batDau) || !Number.isFinite(ketThuc) || ketThuc < batDau) return '—';
 
-  const tongPhut = Math.round((ketThuc - batDau) / 60000);
-  const gio = Math.floor(tongPhut / 60);
-  const phut = tongPhut % 60;
-  if (gio === 0) return `${phut}p`;
-  return `${gio}g ${phut}p`;
+  return dinhDangPhut((ketThuc - batDau) / 60000);
 }
 
 /** Phần chung của 1 lượt in mà các hàm tổng hợp dưới đây cần. */

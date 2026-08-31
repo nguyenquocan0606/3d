@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +13,7 @@ import '../../core/widgets/common.dart';
 import '../../data/models/bulk_order.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/bulk_repository.dart';
+import '../../data/sync/sync_service.dart';
 import '../scanner/scanner_screen.dart';
 import 'bulk_run_sheet.dart';
 
@@ -29,6 +32,8 @@ Future<String> startBulkRun(WidgetRef ref, BulkRun run, String printerId) async 
       .checkInRun(run, printerId);
   // Làm mới danh sách ngay — cache đã được vá lạc quan, chỉ cần đọc lại.
   await ref.read(bulkOrdersProvider.notifier).refresh();
+  // Đẩy hàng đợi lên ngay, khỏi đợi chu kỳ dự phòng 60s — có mạng thì server biết gần như tức thì.
+  unawaited(ref.read(syncProvider.notifier).dongBo());
   return bulkScanMessage(result);
 }
 
@@ -42,6 +47,7 @@ Future<String> finishBulkRun(
       .read(bulkRepositoryProvider)
       .checkOutRun(run, defectQuantity: defectQuantity);
   await ref.read(bulkOrdersProvider.notifier).refresh();
+  unawaited(ref.read(syncProvider.notifier).dongBo());
   return bulkScanMessage(result);
 }
 

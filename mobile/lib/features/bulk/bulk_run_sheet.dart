@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -12,6 +14,7 @@ import '../../core/widgets/common.dart';
 import '../../data/models/bulk_order.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/bulk_repository.dart';
+import '../../data/sync/sync_service.dart';
 import 'bulk_orders_screen.dart' show colorForBulkStatus;
 import 'bulk_scan.dart';
 
@@ -105,6 +108,7 @@ class _BulkRunSheetState extends ConsumerState<_BulkRunSheet> {
         await repo.unverifyRun(_run.id);
       } else {
         await repo.verifyRun(_run);
+        unawaited(ref.read(syncProvider.notifier).dongBo());
       }
       await ref.read(bulkOrdersProvider.notifier).refresh();
       return null; // ở lại bảng để thấy trạng thái vừa đổi

@@ -137,6 +137,41 @@ describe('quetMotLuot', () => {
     expect(banSuKien.mock.calls[0][0].noiDung).toContain('HMS_0500_0400_0001_0044');
   });
 
+  it('mã HMS và mô tả chỉ đính vào phần riêng của Zalo, không lẫn vào nội dung chung', async () => {
+    timTrangThai.mockResolvedValue(trangThai({ status: 'printing', progress: 26 }));
+    await quetMotLuot();
+
+    // Thợ cầm điện thoại ra tới máy phải có sẵn mã để tra wiki, không phải mở web lên xem lại.
+    timTrangThai.mockResolvedValue(
+      trangThai({
+        status: 'error',
+        progress: 26,
+        errorMessage: 'tắc đầu phun',
+        extendedInfo: {
+          payload: {
+            print_status: 'PAUSE',
+            ly_do_dung: 'tắc đầu phun',
+            dung_do_su_co: true,
+            hms: [
+              { ma: '0500_0400_0001_0044', mucDo: 'nghiêm trọng', nang: true, moTa: 'Đầu phun bị tắc.' },
+              { ma: '0300_0100_0002_0001', mucDo: 'thường', nang: false },
+            ],
+          },
+        },
+      }),
+    );
+    await quetMotLuot();
+
+    const { noiDung, kemZalo } = banSuKien.mock.calls[0][0];
+    expect(kemZalo).toContain('0500_0400_0001_0044');
+    expect(kemZalo).toContain('Đầu phun bị tắc.');
+    expect(kemZalo).toContain('nghiêm trọng');
+    // Mã không có mô tả vẫn phải hiện, chứ không bị bỏ qua.
+    expect(kemZalo).toContain('0300_0100_0002_0001');
+    // Lịch sử, Discord và app đẩy vẫn giữ nguyên một dòng như cũ.
+    expect(noiDung).not.toContain('0500_0400_0001_0044');
+  });
+
   it('thợ bấm tạm dừng vẫn chỉ là tạm dừng, và ghi rõ là do người', async () => {
     timTrangThai.mockResolvedValue(trangThai({ status: 'printing', progress: 40 }));
     await quetMotLuot();

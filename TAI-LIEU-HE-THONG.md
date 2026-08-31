@@ -20,6 +20,7 @@
 10. [Những gì hệ thống CHƯA có (gaps)](#10-những-gì-hệ-thống-chưa-có-gaps)
 11. [Kế hoạch port sang Flutter (iOS)](#11-kế-hoạch-port-sang-flutter-ios)
 12. [Phụ lục: bảng tra nhanh](#12-phụ-lục-bảng-tra-nhanh)
+13. [Đăng nhập bản web & phân quyền](#13-đăng-nhập-bản-web--phân-quyền)
 
 ---
 
@@ -1088,7 +1089,7 @@ Cần biết trước khi làm app — đây là những chỗ **phải bổ sun
 
 | # | Thiếu | Ảnh hưởng tới app mobile |
 |---|-------|--------------------------|
-| 1 | **Không có xác thực/phân quyền** | App public trên internet sẽ lộ toàn bộ dữ liệu. **Bắt buộc thêm auth** (xem §11.7) |
+| 1 | **API `/api/*` vẫn chưa có xác thực** | Bản web đã có đăng nhập (xem §13), nhưng `/api/*` cố ý để mở vì app Flutter không có tài khoản. App public trên internet vẫn sẽ lộ toàn bộ dữ liệu — muốn siết phải cấp khóa riêng cho app (xem §11.7) |
 | 2 | **Không có phân trang / filter server-side** | `GET /api/filaments` trả toàn bộ cuộn kèm quan hệ; `GET /api/print-items` trả toàn bộ tem của mọi đơn — có thể vài nghìn record. Trên 4G/iPhone rất chậm |
 | 3 | **Không có endpoint danh sách Spool riêng** | Phải tải qua `/api/filaments` rồi flatten |
 | 4 | **Không có endpoint cập nhật/kết thúc Task3D** | Không đánh dấu được "in xong", không hoàn nhựa |
@@ -1470,3 +1471,69 @@ POST   /api/misa/check-token
 ---
 
 *Tài liệu này mô tả trạng thái codebase tại thời điểm 2026-08-11. Khi backend thay đổi (đặc biệt là thêm auth/phân trang theo §11.6), cần cập nhật lại §5 và §10.*
+
+---
+
+## 13. ĐĂNG NHẬP BẢN WEB & PHÂN QUYỀN
+
+Chỉ áp dụng cho **giao diện web**. App Flutter không đăng nhập và không bị ảnh hưởng.
+
+### 13.1 Vai trò
+
+| Vai trò | Vào được |
+|---------|----------|
+| `admin` | Toàn bộ trang web, kể cả `/tai-khoan` để quản lý tài khoản |
+| `nhanVien` | Chỉ `/hang-hoa-cua-hang`. Đăng nhập xong hoặc mở bất kỳ URL nào khác đều bị đẩy về trang này |
+
+### 13.2 Tài khoản dựng sẵn
+
+Migration `20260822090000_dang_nhap_web` tạo sẵn hai tài khoản:
+
+| Tên đăng nhập | Mật khẩu | Vai trò |
+|---------------|----------|---------|
+| `admin` | `admin@123` | admin |
+| `nhanvien` | `nhanvien@123` | nhanVien |
+
+> ⚠️ Băm của hai mật khẩu này nằm trong mã nguồn → **đổi ngay sau lần đăng nhập đầu tiên**
+> (menu tài khoản → *Đổi mật khẩu*, hoặc trang `/tai-khoan`).
+
+### 13.3 Cách hoạt động
+
+- **Mật khẩu**: PBKDF2-SHA256, 120.000 vòng, muối 16 byte — lưu ở `NguoiDung.matKhauBam`
+  dạng `pbkdf2$<vòng lặp>$<muối>$<băm>`.
+- **Phiên**: cookie `phien_3d` (`httpOnly`), nội dung tự ký HMAC-SHA256 bằng `AUTH_SECRET`,
+  sống 30 ngày. Không tra DB mỗi request nên middleware không cộng thêm truy vấn vào mỗi lần tải trang.
+- Tất cả dùng Web Crypto (`src/utils/auth.ts`) nên chạy được cả ở Node runtime lẫn Edge runtime
+  của middleware, không cần thêm thư viện nào.
+- **Chặn ở đâu**: `src/middleware.ts` — chỉ chặn **các trang**. `/api/*` giữ nguyên như cũ
+  (kèm CORS) để app Flutter gọi được. Vì vậy phân quyền nhân viên là giới hạn ở tầng giao diện;
+  các route quản lý tài khoản `/api/nguoi-dung*` tự kiểm tra vai trò trong chính route handler.
+
+### 13.4 Biến môi trường
+
+| Biến | Ý nghĩa |
+|------|---------|
+| `AUTH_SECRET` | Bắt buộc. Chuỗi ngẫu nhiên ≥ 16 ký tự để ký cookie. Đổi khóa = mọi phiên đang đăng nhập bị vô hiệu |
+| `AUTH_COOKIE_SECURE` | `true` khi chạy qua HTTPS. Để `false` khi chạy HTTP trong LAN, nếu không trình duyệt sẽ bỏ cookie |
+
+### 13.5 API
+
+| Method | Đường dẫn | Ghi chú |
+|--------|-----------|---------|
+| POST | `/api/auth/dang-nhap` | `{ tenDangNhap, matKhau }` → đặt cookie phiên |
+| POST | `/api/auth/dang-xuat` | Xóa cookie phiên |
+| GET | `/api/auth/toi` | Tài khoản đang đăng nhập (`null` nếu chưa) |
+| POST | `/api/auth/doi-mat-khau` | `{ matKhauCu, matKhauMoi }` — đổi mật khẩu của chính mình |
+| GET/POST | `/api/nguoi-dung` | Danh sách / tạo tài khoản — **chỉ admin** |
+| PATCH/DELETE | `/api/nguoi-dung/[id]` | Sửa (họ tên, vai trò, khóa, đặt lại mật khẩu) / xóa — **chỉ admin** |
+
+Ràng buộc an toàn: không tự khóa, tự hạ quyền hay tự xóa tài khoản đang đăng nhập; luôn phải
+còn ít nhất một admin đang hoạt động.
+
+### 13.6 Cứu hộ khi mất hết tài khoản admin
+
+```bash
+node scripts/nguoi-dung.mjs liet-ke
+node scripts/nguoi-dung.mjs doi-mat-khau admin <matKhauMoi>   # đồng thời mở khóa tài khoản
+node scripts/nguoi-dung.mjs them <ten> <matKhau> admin "Họ tên"
+```

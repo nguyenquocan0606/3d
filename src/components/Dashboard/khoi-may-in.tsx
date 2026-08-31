@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Printer, Wifi, WifiOff, AlertCircle } from 'lucide-react';
+import { gioDuKienXong } from '@/utils/gio-du-kien';
 
 // Khối máy in: dùng /api/printers/cloud/status (§5.4)
 // Poll riêng 15s — Home Assistant lag không được kéo sập cả dashboard
@@ -207,10 +208,17 @@ export default function KhoiMayIn({ setActiveTab }: KhoiMayInProps) {
                       style={{ width: `${Math.min(may.progress * 100, 100)}%` }}
                     />
                   </div>
-                  <div className="flex justify-between text-xs text-slate-500">
+                  <div className="flex flex-wrap justify-between gap-x-2 text-xs text-slate-500">
                     <span>{Math.round(may.progress * 100)}%</span>
                     {may.remainingTimeSeconds > 0 && (
-                      <span>{formatGiay(may.remainingTimeSeconds)} còn lại</span>
+                      <span className="whitespace-nowrap">
+                        {formatGiay(may.remainingTimeSeconds)} còn lại
+                      </span>
+                    )}
+                    {gioDuKienXong(may.remainingTimeSeconds) && (
+                      <span className="whitespace-nowrap text-slate-400">
+                        xong {gioDuKienXong(may.remainingTimeSeconds)}
+                      </span>
                     )}
                   </div>
                 </div>

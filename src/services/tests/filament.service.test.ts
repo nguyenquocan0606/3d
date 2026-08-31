@@ -39,6 +39,7 @@ describe('FilamentService', () => {
       const mockFilament = {
         id: 'filament-id-123',
         ...input,
+        costPerKg: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -75,6 +76,7 @@ describe('FilamentService', () => {
         id: 'filament-id-existing',
         ...input,
         colorHex: null,
+        costPerKg: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -181,6 +183,7 @@ describe('FilamentService', () => {
         colorName: 'Xanh Lá',
         colorHex: '#00FF00',
         brand: 'eSun',
+        costPerKg: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -233,6 +236,7 @@ describe('FilamentService', () => {
         colorName: 'Đỏ',
         colorHex: '#FF0000',
         brand: 'eSun',
+        costPerKg: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       };

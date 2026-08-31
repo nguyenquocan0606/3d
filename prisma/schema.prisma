@@ -18,14 +18,16 @@ model Location {
 }
 
 model Filament {
-  id        String   @id @default(uuid())
-  type      String // PLA, PETG, ABS, TPU...
-  colorName String // Đỏ, Đen, Trắng...
-  colorHex  String? // Mã màu hex hiển thị lên UI (e.g. #FF0000)
-  brand     String? // Hãng sản xuất (e.g. eSun, Creality)
-  spools    Spool[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(uuid())
+  type       String // PLA, PETG, ABS, TPU...
+  colorName  String // Đỏ, Đen, Trắng...
+  colorHex   String? // Mã màu hex hiển thị lên UI (e.g. #FF0000)
+  brand      String? // Hãng sản xuất (e.g. eSun, Creality)
+  costPerKg  Float? // Giá vốn nhựa/kg — dùng tính giaVon cho tab Báo giá in 3D
+  spools     Spool[]
+  quotes     Quote[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@unique([type, colorName, brand])
   @@index([updatedAt])
@@ -45,6 +47,13 @@ model Printer {
   cloudAccountId String?
   cloudPrinterId String? // Lưu trữ ID thực tế trên Cloud
   cloudAccount   CloudAccount? @relation(fields: [cloudAccountId], references: [id], onDelete: SetNull)
+  quotes         Quote[]
+
+  /// Kích thước mâm in (mm) — dùng vẽ mâm ảo + chọn đúng profile OrcaSlicer ở tab Báo giá in 3D.
+  buildVolumeXMm   Float?
+  buildVolumeYMm   Float?
+  buildVolumeZMm   Float?
+  nozzleDiameterMm Float?
 
   /// LAN mode Bambu: mỗi máy in TỰ nó là một broker MQTT, nên thông tin kết nối nằm ở đây
   /// chứ không ở CloudAccount như các provider đi qua một máy chủ trung gian (HA, Moonraker).
@@ -168,6 +177,10 @@ model PeiSheet {
   printerId String? // Gắn mâm này vào máy in nào (nếu đang in)
   printer   Printer?    @relation(fields: [printerId], references: [id], onDelete: SetNull)
   items     PrintItem[]
+  quotes    Quote[]
+  // Loại bề mặt mâm: smooth | textured | cool_plate | engineering (đặt tên theo đúng Bambu) —
+  // ảnh hưởng first-layer settings khi slice thật ở tab Báo giá in 3D.
+  plateType String?
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
@@ -453,6 +466,60 @@ model BulkRun {
   @@index([updatedAt])
   // Index dashboard §7.6: lọc lượt theo (trạng thái, ngày hoàn thành) để tính KPI nhanh
   @@index([status, finishedAt])
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Báo giá in 3D (tab Báo giá) — tải STL/3MF lên, xem/nhân bản model, ra giá nhanh.
+// ══════════════════════════════════════════════════════════════════════════════
+// Chỉ để TÍNH GIÁ, không nối vào Order/PrintItem — nhân viên tự tạo đơn thủ công sau khi chốt giá.
+
+/// Cấu hình chung dùng cho công thức tính giá — luôn đúng MỘT dòng, id cố định "default".
+model CauHinhBaoGia {
+  id String @id @default("default")
+
+  /// Giá điện + khấu hao máy mỗi giờ in (VNĐ) — cộng vào giaVon theo thời gian in ước tính.
+  gioMayInVnd Float @default(3000)
+
+  updatedAt DateTime @updatedAt
+}
+
+/// Một lần báo giá — lưu lại để xem lịch sử, KHÔNG có quan hệ tới Order.
+model Quote {
+  id       String @id @default(uuid())
+  fileName String
+  // Đường dẫn tương đối trong data/quote-uploads/ — xem route /api/quote/upload.
+  filePath String?
+
+  printerId  String?
+  printer    Printer?  @relation(fields: [printerId], references: [id], onDelete: SetNull)
+  peiSheetId String?
+  peiSheet   PeiSheet? @relation(fields: [peiSheetId], references: [id], onDelete: SetNull)
+  filamentId String?
+  filament   Filament? @relation(fields: [filamentId], references: [id], onDelete: SetNull)
+
+  infillPercent Float @default(15)
+  layerHeightMm Float @default(0.2)
+  instanceCount Int   @default(1)
+  volumeCm3     Float @default(0)
+
+  weightG     Float @default(0)
+  timeMinutes Float @default(0)
+
+  /// "estimate" = ước lượng heuristic (bản 1) | "slice" = OrcaSlicer headless thật (bản 2).
+  mode String @default("estimate")
+  /// Chỉ có ý nghĩa khi mode = "slice": pending | done | failed.
+  sliceStatus String?
+  sliceError  String?
+
+  giaVon       Float @default(0)
+  gia          Float @default(0)
+  giaBanLe     Float @default(0)
+  giaKhuyenMai Float @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([printerId])
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -751,4 +818,30 @@ model CaiDatThongBao {
   phutToiThieuGiuaAnh Int @default(5)
 
   updatedAt DateTime @updatedAt
+}
+
+/// Tài khoản đăng nhập **bản web**. App Flutter không dùng bảng này — API vẫn mở
+/// cho app như trước (xem ghi chú trong `src/middleware.ts`).
+model NguoiDung {
+  id String @id @default(uuid())
+
+  /// Tên đăng nhập, luôn lưu chữ thường để không phân biệt hoa/thường khi đăng nhập.
+  tenDangNhap String @unique
+  hoTen       String
+
+  /// Chuỗi PBKDF2 tự mô tả `pbkdf2$<vòng lặp>$<muối>$<băm>` (xem `src/utils/auth.ts`).
+  matKhauBam String
+
+  /// `admin` = toàn quyền, `nhanVien` = chỉ vào được trang Hàng hóa cửa hàng.
+  vaiTro String @default("nhanVien")
+
+  /// Khóa tài khoản mà không phải xóa (giữ lại để biết ai từng làm gì).
+  hoatDong Boolean @default(true)
+
+  lanDangNhapCuoi DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
 }

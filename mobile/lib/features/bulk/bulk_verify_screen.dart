@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -9,6 +11,7 @@ import '../../core/widgets/common.dart';
 import '../../data/models/bulk_order.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/bulk_repository.dart';
+import '../../data/sync/sync_service.dart';
 import '../scanner/scanner_screen.dart';
 
 /// Kiểm hàng đơn SLL: quẹt lại từng mâm ĐÃ IN XONG để đối soát trước khi giao.
@@ -57,6 +60,7 @@ class _BulkVerifyScreenState extends ConsumerState<BulkVerifyScreen> {
 
     await ref.read(bulkRepositoryProvider).verifyRun(run);
     await ref.read(bulkOrdersProvider.notifier).refresh();
+    unawaited(ref.read(syncProvider.notifier).dongBo());
 
     final capNhat = ref.read(bulkOrderByIdProvider(widget.orderId)) ?? order;
     return '✔ PEI ${run.peiIndex} · ${run.quantity} con — '
@@ -76,6 +80,7 @@ class _BulkVerifyScreenState extends ConsumerState<BulkVerifyScreen> {
         await ref.read(bulkRepositoryProvider).unverifyRun(run.id);
       } else {
         await ref.read(bulkRepositoryProvider).verifyRun(run);
+        unawaited(ref.read(syncProvider.notifier).dongBo());
       }
       await ref.read(bulkOrdersProvider.notifier).refresh();
     } catch (error) {

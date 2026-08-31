@@ -32,6 +32,7 @@ class ScaleAudio {
     'active': 'audio/active.mp3',
     'spool': 'audio/spool.mp3',
     'done': 'audio/done.mp3',
+    'error': 'audio/error.wav',
     'tab_total': 'audio/tab_total.mp3',
     'tab_remaining': 'audio/tab_remaining.mp3',
     'tab_empty': 'audio/tab_empty.mp3',

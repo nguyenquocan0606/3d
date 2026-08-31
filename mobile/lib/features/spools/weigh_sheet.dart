@@ -105,7 +105,10 @@ class _WeighSheetState extends ConsumerState<WeighSheet> {
       await ref.read(filamentsProvider.notifier).refresh();
 
       if (!silent && mounted) {
-        showToast(context, 'Đã lưu ${Fmt.grams(value)} cho cuộn ${_spool.id}.');
+        final message = value <= 0
+            ? 'Đã xóa cuộn ${_spool.id} vì đã hết nhựa.'
+            : 'Đã lưu ${Fmt.grams(value)} cho cuộn ${_spool.id}.';
+        showToast(context, message);
       }
       ref.read(scaleAudioProvider).speak('done');
       return true;
