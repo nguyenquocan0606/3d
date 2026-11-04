@@ -9,11 +9,13 @@ import 'models/inventory.dart';
 import 'models/location.dart';
 import 'models/order.dart';
 import 'models/eshop_order.dart';
+import 'models/facebook.dart';
 import 'models/printer.dart';
 import 'models/printer_event.dart';
 import 'models/store.dart';
 import 'repositories/bulk_repository.dart';
 import 'repositories/dashboard_repository.dart';
+import 'repositories/facebook_repository.dart';
 import 'repositories/filament_repository.dart';
 import 'repositories/inventory_repository.dart';
 import 'repositories/location_repository.dart';
@@ -162,6 +164,79 @@ final printerEventsProvider =
     FutureProvider.autoDispose.family<List<PrinterEvent>, String?>(
   (ref, printerId) =>
       ref.watch(notifyRepositoryProvider).fetchSuKien(printerId: printerId),
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Khách Facebook
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Danh sách bài theo bộ lọc. Dữ liệu chỉ có trên máy chủ (không vào SQLite) vì agent gửi bài về
+/// liên tục, và mọi thao tác trên bài đều cần mạng để agent nhận việc.
+class KhachFacebookNotifier
+    extends AutoDisposeFamilyAsyncNotifier<DuLieuKhach, LocKhach> {
+  /// Đổi bộ lọc là provider cũ bị huỷ trong khi lượt tải có thể còn đang chạy.
+  bool _conDung = false;
+
+  @override
+  Future<DuLieuKhach> build(LocKhach arg) {
+    _conDung = true;
+    ref.onDispose(() => _conDung = false);
+    return ref.watch(facebookRepositoryProvider).fetchKhach(arg.khoa);
+  }
+
+  /// Tải lại ngầm: rớt mạng một nhịp thì giữ nguyên danh sách đang xem thay vì bật màn lỗi.
+  Future<void> taiLai() async {
+    final repo = ref.read(facebookRepositoryProvider);
+    try {
+      final moi = await repo.fetchKhach(arg.khoa);
+      if (_conDung) state = AsyncData(moi);
+    } catch (error, stack) {
+      if (_conDung && !state.hasValue) state = AsyncError(error, stack);
+    }
+  }
+
+  /// Sửa ngay trên màn hình một bài (nhãn "chờ agent", "đã mở link"…), không đợi lượt tải lại.
+  void suaBai(String id, Map<String, dynamic> thayDoi) {
+    final dl = state.valueOrNull;
+    if (dl == null) return;
+    state = AsyncData(dl.voi(bai: [
+      for (final b in dl.bai) b.id == id ? b.voi(thayDoi) : b,
+    ]));
+  }
+
+  /// Gỡ ngay khỏi danh sách cho nhanh tay; lỗi thì lượt tải lại đưa bài về chỗ cũ.
+  void boBai(String id) {
+    final dl = state.valueOrNull;
+    if (dl == null) return;
+    state = AsyncData(dl.voi(bai: dl.bai.where((b) => b.id != id).toList()));
+  }
+
+  void suaLenhAgent(String ten, String lenh) {
+    final dl = state.valueOrNull;
+    if (dl == null) return;
+    state = AsyncData(dl.voi(agent: [
+      for (final a in dl.agent) a.ten == ten ? a.voiLenh(lenh) : a,
+    ]));
+  }
+}
+
+final khachFacebookProvider = AsyncNotifierProvider.autoDispose
+    .family<KhachFacebookNotifier, DuLieuKhach, LocKhach>(
+  KhachFacebookNotifier.new,
+);
+
+/// Số khách mới + agent, cho nút ở màn Tổng quan — không kéo cả trăm bài chỉ để hiện một con số.
+final demKhachFacebookProvider = FutureProvider.autoDispose<DuLieuKhach>(
+  (ref) => ref.watch(facebookRepositoryProvider).fetchDem(),
+);
+
+final nhomFacebookProvider = FutureProvider.autoDispose<List<NhomFacebook>>(
+  (ref) => ref.watch(facebookRepositoryProvider).fetchNhom(),
+);
+
+/// Phần cài đặt app cần đọc (mẫu bình luận, mẫu tin nhắn…). Sửa cài đặt vẫn làm trên web.
+final caiDatFacebookProvider = FutureProvider.autoDispose<CaiDatFacebook>(
+  (ref) => ref.watch(facebookRepositoryProvider).fetchCaiDat(),
 );
 
 // ─────────────────────────────────────────────────────────────────────────────

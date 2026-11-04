@@ -62,6 +62,20 @@ class Fmt {
     return '$gio ${_dayMonth.format(xong)}';
   }
 
+  /// "14:32 14/10" — đọc nhanh lúc nào trong ngày, khỏi tính nhẩm "3 giờ trước".
+  static String gioNgay(DateTime? value) =>
+      value == null ? '—' : '${_hourMinute.format(value)} ${_dayMonth.format(value)}';
+
+  /// "vừa xong" / "5 phút trước" / "3 giờ trước", quá một ngày thì ghi ngày giờ.
+  static String tuongDoi(DateTime? value, {DateTime? now}) {
+    if (value == null) return '—';
+    final phut = ((now ?? DateTime.now()).difference(value).inSeconds / 60).round();
+    if (phut < 1) return 'vừa xong';
+    if (phut < 60) return '$phut phút trước';
+    final gio = (phut / 60).round();
+    return gio < 24 ? '$gio giờ trước' : dateTime(value);
+  }
+
   static String fileSize(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).round()} KB';

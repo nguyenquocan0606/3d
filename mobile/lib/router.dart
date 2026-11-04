@@ -7,6 +7,9 @@ import 'features/bulk/bulk_orders_screen.dart';
 import 'features/bulk/create_bulk_order_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/eshop/eshop_order_detail_screen.dart';
+import 'features/facebook/khach_facebook_screen.dart';
+import 'features/facebook/nhat_ky_facebook_screen.dart';
+import 'features/facebook/nhom_facebook_screen.dart';
 import 'features/inventory/inventory_screen.dart';
 import 'features/jobs/create_job_screen.dart';
 import 'features/jobs/print_history_screen.dart';
@@ -153,6 +156,18 @@ final appRouter = GoRouter(
       path: Routes.printerEvents,
       builder: (context, state) =>
           PrinterEventsScreen(printerId: state.uri.queryParameters['printerId']),
+    ),
+    GoRoute(
+      path: Routes.khachFacebook,
+      builder: (context, state) => const KhachFacebookScreen(),
+    ),
+    GoRoute(
+      path: Routes.nhomFacebook,
+      builder: (context, state) => const NhomFacebookScreen(),
+    ),
+    GoRoute(
+      path: Routes.nhatKyFacebook,
+      builder: (context, state) => const NhatKyFacebookScreen(),
     ),
     GoRoute(
       path: Routes.settings,

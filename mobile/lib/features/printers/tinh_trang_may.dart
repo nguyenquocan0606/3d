@@ -93,7 +93,7 @@ class TinhTrangMay extends StatelessWidget {
                   Row(
                     children: [
                       Expanded(
-                        // Cho chọn để copy: không có url_launcher nên người dùng tự tra mã trên wiki.
+                        // Cho chọn để copy: người dùng tự tra mã trên wiki.
                         child: SelectableText(
                           l.ma,
                           style: TextStyle(

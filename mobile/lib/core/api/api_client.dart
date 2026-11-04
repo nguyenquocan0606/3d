@@ -29,8 +29,11 @@ class ApiClient {
           {Map<String, dynamic>? query}) =>
       _send(path, 'GET', parse, query: query);
 
-  Future<T> post<T>(String path, T Function(dynamic data) parse, {Object? body}) =>
-      _send(path, 'POST', parse, body: body);
+  /// [receiveTimeout]: chỉ cho route biết trước là chậm (VD thêm nhóm Facebook — mỗi link một lần
+  /// hỏi Facebook, làm lần lượt); mặc định theo `dioProvider`.
+  Future<T> post<T>(String path, T Function(dynamic data) parse,
+          {Object? body, Duration? receiveTimeout}) =>
+      _send(path, 'POST', parse, body: body, receiveTimeout: receiveTimeout);
 
   Future<T> put<T>(String path, T Function(dynamic data) parse, {Object? body}) =>
       _send(path, 'PUT', parse, body: body);
@@ -47,6 +50,7 @@ class ApiClient {
     T Function(dynamic data) parse, {
     Object? body,
     Map<String, dynamic>? query,
+    Duration? receiveTimeout,
   }) async {
     Response<dynamic> response;
     try {
@@ -54,7 +58,7 @@ class ApiClient {
         path,
         data: body,
         queryParameters: query,
-        options: Options(method: method),
+        options: Options(method: method, receiveTimeout: receiveTimeout),
       );
     } on DioException catch (error) {
       // Backend trả lỗi nghiệp vụ kèm body JSON — ưu tiên message tiếng Việt của nó.

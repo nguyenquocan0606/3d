@@ -13,7 +13,8 @@ name: Mobile CI
 
 on:
   push:
-    branches: [main, master]
+    # app/**: nhánh làm tính năng app, build luôn để lấy APK/IPA thử trước khi gộp vào main.
+    branches: [main, master, 'app/**']
     paths: ['mobile/**', '.github/workflows/mobile.yml']
   pull_request:
     paths: ['mobile/**', '.github/workflows/mobile.yml']

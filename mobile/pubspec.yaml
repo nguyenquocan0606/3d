@@ -70,6 +70,9 @@ dependencies:
   # Android không tự hiện thông báo khi app đang mở, phải tự dựng.
   flutter_local_notifications: ^18.0.1
 
+  # Mở bài viết / trang cá nhân Facebook bằng app Facebook hoặc trình duyệt của máy.
+  url_launcher: ^6.3.3
+
   cupertino_icons: ^1.0.8
 
 dev_dependencies:

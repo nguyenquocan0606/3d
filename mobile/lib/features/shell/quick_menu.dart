@@ -162,6 +162,13 @@ const quickActionGroups = <QuickActionGroup>[
   ]),
   QuickActionGroup('Cửa hàng & hệ thống', [
     QuickAction(
+      icon: Icons.person_search_rounded,
+      title: 'Khách Facebook',
+      subtitle: 'Bài cần in 3D, bình luận, nhắn tin, nhóm',
+      color: AppColors.success,
+      route: Routes.khachFacebook,
+    ),
+    QuickAction(
       icon: Icons.storefront_rounded,
       title: 'Hàng hóa cửa hàng',
       subtitle: 'Tra cứu, nhập/xuất kho, giá và combo',

@@ -11,6 +11,7 @@ import '../../core/widgets/common.dart';
 import '../../data/models/dashboard.dart';
 import '../../data/models/filament.dart';
 import '../../data/providers.dart';
+import '../facebook/nut_khach_facebook.dart';
 import '../shell/quick_menu.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -41,7 +42,10 @@ class DashboardScreen extends ConsumerWidget {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: () => refreshCoreData(ref),
+        onRefresh: () {
+          ref.invalidate(demKhachFacebookProvider);
+          return refreshCoreData(ref);
+        },
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, AppSize.listBottomInset),
           children: [
@@ -51,6 +55,10 @@ class DashboardScreen extends ConsumerWidget {
 
             // ── 2. Trạm cân (giữ nguyên — dùng nhiều nhất) ───────────────
             const _ScaleBanner(),
+            const SizedBox(height: 16),
+
+            // ── Khách Facebook: có khách mới là thấy ngay khi mở app ──────
+            const NutKhachFacebook(),
             const SizedBox(height: 16),
 
             // ── 3. KPI 4 ô ────────────────────────────────────────────────
