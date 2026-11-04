@@ -41,6 +41,11 @@ class Routes {
   static String printerEventsOf(String printerId) =>
       '$printerEvents?printerId=${Uri.encodeComponent(printerId)}';
 
+  /// Khách Facebook: danh sách bài, nhóm theo dõi, nhật ký agent.
+  static const khachFacebook = '/khach-facebook';
+  static const nhomFacebook = '/khach-facebook/nhom';
+  static const nhatKyFacebook = '/khach-facebook/nhat-ky';
+
   // Màn chi tiết (push lên root navigator)
   static String spoolDetail(String id) => '/spool/${Uri.encodeComponent(id)}';
   static String printerDetail(String id) => '/printer/${Uri.encodeComponent(id)}';

@@ -92,6 +92,12 @@ Tab **Tất cả** là menu đầy đủ mọi tính năng, gom theo 5 nhóm (Qu
 Máy in & lệnh in / Sản xuất / Cửa hàng & hệ thống). Cùng menu đó mở nhanh được từ bất kỳ
 màn hình chính nào qua nút **☰** trên thanh tiêu đề, khỏi phải quay về tab.
 
+**Khách Facebook** mở từ nút ở Tổng quan hoặc menu Tất cả, làm được như tab trên web: lọc bài, xem
+vị trí và ảnh, bình luận, nhắn tin, đánh dấu đã liên hệ / bỏ qua, chặn người đăng, chấm bài treo,
+chạy / dừng agent, quản lý nhóm theo dõi, xem nhật ký realtime. Phần **cài đặt chỉ sửa trên web**
+(chế độ, lịch chạy, ngưỡng phân hạng, mẫu, tự bình luận, danh sách đen, kênh báo). Dữ liệu không lưu
+vào SQLite: bài về liên tục và thao tác nào cũng cần agent nhận việc, nên màn này cần có mạng.
+
 **Nút QUÉT là trung tâm của app.** Mỗi loại tem mở đúng màn thông tin của nó
 (port `handleScannedCode` của `src/app/page.tsx`):
 

@@ -83,6 +83,44 @@ DateTime? asDate(dynamic value) {
 
 DateTime asDateOr(dynamic value, DateTime fallback) => asDate(value) ?? fallback;
 
+/// Thay nửa ký tự (surrogate lẻ) bằng `�`. Chuỗi cắt bằng `.slice` của JS có thể đứt đúng giữa
+/// emoji; Flutter gặp chuỗi như vậy là ném lỗi lúc vẽ chữ và cả dòng thành ô báo lỗi.
+String chuoiHopLe(String s) {
+  StringBuffer? ra;
+  var daChep = 0;
+  for (var i = 0; i < s.length; i++) {
+    final c = s.codeUnitAt(i);
+    if (c < 0xD800 || c > 0xDFFF) continue;
+    final moDau = c <= 0xDBFF;
+    if (moDau && i + 1 < s.length) {
+      final sau = s.codeUnitAt(i + 1);
+      if (sau >= 0xDC00 && sau <= 0xDFFF) {
+        i++;
+        continue;
+      }
+    }
+    ra ??= StringBuffer();
+    ra.write(s.substring(daChep, i));
+    ra.write('\uFFFD');
+    daChep = i + 1;
+  }
+  if (ra == null) return s;
+  ra.write(s.substring(daChep));
+  return ra.toString();
+}
+
+/// [chuoiHopLe] cho mọi chuỗi trong một cây JSON.
+dynamic jsonHopLe(dynamic value) {
+  if (value is String) return chuoiHopLe(value);
+  if (value is List) return value.map(jsonHopLe).toList();
+  if (value is Map) {
+    return <String, dynamic>{
+      for (final e in value.entries) '${e.key}': jsonHopLe(e.value),
+    };
+  }
+  return value;
+}
+
 /// Bỏ mọi entry null để PUT/PATCH chỉ gửi field thực sự muốn đổi —
 /// backend phân biệt rõ "không gửi" (giữ nguyên) và "gửi null" (xóa giá trị).
 Map<String, dynamic> compact(Map<String, dynamic> source) {
