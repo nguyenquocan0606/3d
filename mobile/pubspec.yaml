@@ -73,6 +73,11 @@ dependencies:
   # Mở bài viết / trang cá nhân Facebook bằng app Facebook hoặc trình duyệt của máy.
   url_launcher: ^6.3.3
 
+  # Phiếu báo giá: chụp / chọn ảnh sản phẩm gắn vào hạng mục, chia sẻ ảnh phiếu và link
+  # sang Zalo / Messenger.
+  image_picker: ^1.1.2
+  share_plus: ^10.1.4
+
   cupertino_icons: ^1.0.8
 
 dev_dependencies:

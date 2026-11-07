@@ -10,6 +10,7 @@ Những thứ script này bảo đảm:
     - cho phép HTTP thường (cleartext) vì máy chủ trong LAN chạy http://
   iOS
     - NSCameraUsageDescription (bắt buộc, thiếu là App Store từ chối)
+    - NSPhotoLibraryUsageDescription (chọn ảnh sản phẩm cho phiếu báo giá)
     - NSAppTransportSecurity cho phép gọi http:// tới máy chủ LAN
     - NSLocalNetworkUsageDescription (iOS 14+ hỏi quyền khi truy cập LAN)
     - UIBackgroundModes: remote-notification (nhận push lúc app ở nền)
@@ -243,6 +244,10 @@ IOS_KEYS = {
     "NSCameraUsageDescription": """	<key>NSCameraUsageDescription</key>
 	<string>App dùng camera để quét mã QR/barcode của cuộn nhựa, kho, tem đơn hàng và hàng hóa.</string>
 """,
+    # image_picker: chọn ảnh sản phẩm gắn vào hạng mục báo giá. Thiếu key là app văng khi mở thư viện ảnh.
+    "NSPhotoLibraryUsageDescription": """	<key>NSPhotoLibraryUsageDescription</key>
+	<string>App lấy ảnh sản phẩm trong thư viện để gắn vào phiếu báo giá gửi khách.</string>
+""",
     "NSLocalNetworkUsageDescription": """	<key>NSLocalNetworkUsageDescription</key>
 	<string>App kết nối tới máy chủ 3D Manage và trạm cân trong mạng nội bộ của xưởng.</string>
 """,
@@ -282,7 +287,7 @@ def patch_ios_plist() -> None:
         return
 
     plist.write_text(text[:index] + "".join(thieu) + text[index:], encoding="utf-8")
-    ok(f"Info.plist: thêm {len(thieu)} key (camera, LAN, ATS, nhận thông báo nền)")
+    ok(f"Info.plist: thêm {len(thieu)} key (camera, thư viện ảnh, LAN, ATS, nhận thông báo nền)")
 
 
 def _version_key(value: str) -> tuple[int, ...]:

@@ -168,12 +168,13 @@ dính tới mã, QR và quét đều có trên app.
 | Kiểm kho | Phiên kiểm, quét liên tục, tiến độ, bộ lọc, QR lệnh | thứ tự sắp xếp giống backend |
 | Hàng hóa | Danh sách + lọc/sắp xếp, chi tiết, **nhập/xuất/đặt tồn kho**, ảnh, lịch sử, combo | |
 | Trạm cân | Toàn màn hình, tare, hiệu chuẩn | |
+| **Báo giá khách** | Danh sách + tab phân loại, **lập phiếu** (khách, hạng mục tính theo gram/giờ in, chiết khấu, VAT, cọc/QR, điều khoản), **ảnh sản phẩm từ camera/thư viện**, lấy dòng từ máy tính giá 3D, gửi khách (tin nhắn kèm link, ảnh phiếu, PDF) | cần **đăng nhập admin**, xem §11 |
 | **Hoạt động máy in** | Nhật ký mọi hoạt động (bắt đầu, xong, tạm dừng, lỗi, mất kết nối, kẹt, nhiệt bất thường) + lọc chỉ sự cố | nhận **thông báo đẩy**, xem §10 |
 | Cài đặt | Máy chủ, API key, MQTT, kiểm tra kết nối, kiểm tra MISA, **chế độ quét (camera / máy PDA)**, **thông báo máy in** | xem §9, §10 |
 
 ### Cố ý **không** đưa lên app (giữ ở web)
 
-Tất cả thao tác **tạo mới dữ liệu gốc** — trừ cuộn nhựa: tạo kho, tạo máy in, kết nối
+Tất cả thao tác **tạo mới dữ liệu gốc** — trừ cuộn nhựa và phiếu báo giá: tạo kho, tạo máy in, kết nối
 cloud, tạo/sửa đơn hàng nhiều cấp, tạo mâm PEI, tạo/sửa hàng hóa kèm upload ảnh & file in,
 xuất/nhập JSON, nhập credential MISA.
 
@@ -361,3 +362,35 @@ hiện trên web để biết cái nào là cái nào).
 | `PRINTER_STALL_MINUTES` | 30 | tiến độ đứng yên bao lâu thì kêu kẹt |
 | `PRINTER_MAX_NOZZLE_C` | 300 | nhiệt vòi tối đa coi là bất thường |
 | `PRINTER_MAX_BED_C` | 120 | nhiệt bàn tối đa coi là bất thường |
+
+---
+
+## 11. Báo giá khách
+
+Bản app của tab Phiếu báo giá trên web (`src/components/PhieuBaoGia/`), mở ở **Tất cả → Báo giá khách**.
+Cùng một file JSON trên máy chủ, nên soạn trên điện thoại rồi mở web sửa tiếp (hoặc ngược lại) đều được.
+
+### Đăng nhập admin
+
+Phiếu có thông tin khách nên mọi API báo giá đòi phiên **admin** của bản web (`yeuCauAdmin`). Lần đầu mở
+màn Báo giá, app hỏi tên đăng nhập + mật khẩu web, gọi đúng `POST /api/auth/dang-nhap`, giữ giá trị cookie
+`phien_3d` rồi tự gửi kèm header `Cookie` ở mọi request (`core/auth/phien_admin.dart`). Phiên sống 30 ngày;
+hết hạn hoặc máy chủ đổi `AUTH_SECRET` thì app quay về ô đăng nhập. Tài khoản nhân viên bị từ chối. Đăng
+xuất ở menu ⋮ của màn danh sách. Các tính năng khác của app **không** cần đăng nhập.
+
+### Soạn phiếu
+
+- **Tự lưu** như web: gõ xong 0,8 giây là lưu, tiêu đề hiện "Đã lưu / Đang lưu / Lưu lỗi". Thoát màn hình
+  thì chờ lưu xong mới đóng.
+- **Hạng mục** sửa trong bảng kéo lên: nhập gram và giờ in là đơn giá tự tính (gram × tiền/gr + giờ ×
+  tiền/giờ, có chip giá bấm nhanh), hoặc để trống cả hai để gõ đơn giá tay. Chiết khấu dòng, phí khác,
+  căn giá sau giảm, giá gốc / lãi "chỉ xưởng xem" giống hệt web.
+- **Ảnh sản phẩm**: chụp bằng camera hoặc chọn nhiều ảnh trong thư viện, tối đa 6 ảnh / hạng mục.
+- **Gửi khách**: tin nhắn kèm link (mở thẳng Zalo / Messenger), ảnh tờ phiếu, PDF, chép link. Link luôn là
+  `https://mochilab3d.com/bg/<token>` — địa chỉ LAN của app khách ở ngoài không mở được.
+- Ảnh và PDF do **máy chủ chụp** từ trang in của web (Chromium), nên giống đúng bản web gửi đi; app không vẽ
+  lại tờ A4.
+- Thông tin xưởng (tài khoản ngân hàng, logo, điều khoản mặc định) vẫn sửa ở web; app chỉ đọc.
+
+Công thức tiền ở `data/models/bao_gia.dart` là bản chép 1-1 của `src/utils/phieu-bao-gia.ts`; sửa bên nào
+thì phải sửa cả bên kia và chạy `flutter test test/bao_gia_test.dart`.

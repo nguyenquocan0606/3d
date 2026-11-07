@@ -30,6 +30,9 @@ class Routes {
   static const orderCheck = '/order-check';
   static const settings = '/settings';
 
+  /// Phiếu báo giá gửi khách (cần đăng nhập admin).
+  static const baoGia = '/bao-gia';
+
   /// Xem camera của tất cả máy in cùng lúc.
   static const cameras = '/cameras';
 
@@ -56,4 +59,5 @@ class Routes {
   static String peiSheetDetail(String id) => '/pei-sheet/${Uri.encodeComponent(id)}';
   static String bulkOrderDetail(String id) => '/bulk-order/${Uri.encodeComponent(id)}';
   static String eshopOrderDetail(String id) => '/eshop-order/${Uri.encodeComponent(id)}';
+  static String phieuBaoGia(String id) => '/phieu-bao-gia/${Uri.encodeComponent(id)}';
 }

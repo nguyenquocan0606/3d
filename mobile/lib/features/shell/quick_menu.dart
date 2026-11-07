@@ -38,8 +38,9 @@ class QuickActionGroup {
 /// Toàn bộ tính năng của app, gom nhóm theo nghiệp vụ.
 ///
 /// Nguyên tắc phân vai với bản web: **web quản trị (tạo/sửa dữ liệu gốc), app vận
-/// hành** — mọi thứ dính tới mã, QR và quét đều có ở đây. Ngoại lệ duy nhất được
-/// phép tạo mới trên app là **cuộn nhựa**, vì đó là việc làm ngay tại kệ hàng.
+/// hành** — mọi thứ dính tới mã, QR và quét đều có ở đây. Ngoại lệ được phép tạo
+/// mới trên app: **cuộn nhựa** (việc làm ngay tại kệ hàng) và **phiếu báo giá**
+/// (khách hỏi giá lúc người bán không ngồi máy tính).
 const quickActionGroups = <QuickActionGroup>[
   QuickActionGroup('Quét & mã', [
     QuickAction(
@@ -167,6 +168,13 @@ const quickActionGroups = <QuickActionGroup>[
       subtitle: 'Bài cần in 3D, bình luận, nhắn tin, nhóm',
       color: AppColors.success,
       route: Routes.khachFacebook,
+    ),
+    QuickAction(
+      icon: Icons.request_quote_rounded,
+      title: 'Báo giá khách',
+      subtitle: 'Lập phiếu, gửi link / ảnh cho khách chốt',
+      color: AppColors.indigoLight,
+      route: Routes.baoGia,
     ),
     QuickAction(
       icon: Icons.storefront_rounded,

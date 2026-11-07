@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../auth/phien_admin.dart';
 import '../config/app_settings.dart';
 
 /// Lỗi nghiệp vụ trả về từ API — `message` luôn là tiếng Việt nên hiển thị thẳng được.
@@ -121,6 +122,17 @@ final dioProvider = Provider<Dio>((ref) {
       // Tự xử lý status code ở tầng trên (backend trả 4xx/5xx kèm body hợp lệ).
       validateStatus: (_) => true,
       responseType: ResponseType.json,
+    ),
+  );
+  // Đã đăng nhập admin (để dùng báo giá) thì gửi kèm cookie phiên ở mọi request. Đọc lúc gửi thay vì
+  // `watch`, để đăng nhập / đăng xuất không dựng lại Dio và mọi repository phía sau.
+  dio.interceptors.add(
+    InterceptorsWrapper(
+      onRequest: (options, handler) {
+        final phien = ref.read(phienAdminProvider);
+        if (phien != null) options.headers['Cookie'] = '$tenCookiePhien=${phien.token}';
+        handler.next(options);
+      },
     ),
   );
   ref.onDispose(dio.close);

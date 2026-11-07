@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/routes.dart';
+import 'features/bao_gia/bao_gia_screen.dart';
+import 'features/bao_gia/soan_bao_gia_screen.dart';
 import 'features/bulk/bulk_order_detail_screen.dart';
 import 'features/bulk/bulk_orders_screen.dart';
 import 'features/bulk/create_bulk_order_screen.dart';
@@ -170,6 +172,10 @@ final appRouter = GoRouter(
       builder: (context, state) => const NhatKyFacebookScreen(),
     ),
     GoRoute(
+      path: Routes.baoGia,
+      builder: (context, state) => const BaoGiaScreen(),
+    ),
+    GoRoute(
       path: Routes.settings,
       builder: (context, state) => const SettingsScreen(),
     ),
@@ -214,6 +220,10 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/eshop-order/:id',
       builder: (context, state) => EshopOrderDetailScreen(orderId: _param(state)),
+    ),
+    GoRoute(
+      path: '/phieu-bao-gia/:id',
+      builder: (context, state) => SoanBaoGiaScreen(id: _param(state)),
     ),
   ],
 );
